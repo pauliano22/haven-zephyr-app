@@ -1,0 +1,31 @@
+/*
+ * Devkit wiring for the ADAU1860 DSP.
+ *
+ * Control port  : I2C0  (ADAU1860 address 0x28 with ADDR0/ADDR1 low)
+ * Fast download : SPI1  (self-boot/program + coefficient safeload path)
+ *
+ * Adjust pins to match the production PCB netlist when it lands.
+ */
+
+&i2c0 {
+	status = "okay";
+	clock-frequency = <I2C_BITRATE_FAST>;
+
+	adau1860: adau1860@28 {
+		compatible = "adi,adau1860";
+		reg = <0x28>;
+		status = "okay";
+	};
+};
+
+&spi1 {
+	status = "okay";
+	cs-gpios = <&gpio0 20 GPIO_ACTIVE_LOW>;
+
+	adau1860_spi: adau1860_spi@0 {
+		compatible = "adi,adau1860-spi";
+		reg = <0>;
+		spi-max-frequency = <8000000>;
+		status = "okay";
+	};
+};
