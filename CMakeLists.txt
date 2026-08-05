@@ -1,8 +1,8 @@
-# AcousticShield nRF52 firmware — nRF Connect SDK (Zephyr) application
+# Haven nRF52 firmware — nRF Connect SDK (Zephyr) application
 cmake_minimum_required(VERSION 3.20.0)
 
 find_package(Zephyr REQUIRED HINTS $ENV{ZEPHYR_BASE})
-project(nrf52_acousticshield_fw)
+project(nrf52_haven_fw)
 
 target_sources(app PRIVATE
   src/main.c

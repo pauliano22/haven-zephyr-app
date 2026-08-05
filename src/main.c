@@ -1,4 +1,4 @@
-/* AcousticShield nRF52 firmware
+/* Haven nRF52 firmware
  *
  * Pipeline: NUS write → line assembler → protocol_parse_line() → ADAU1860
  * driver. Parsing and DSP dispatch run on the system workqueue via the BLE
@@ -39,7 +39,7 @@ static void handle_line(const char *line)
 
 int main(void)
 {
-	LOG_INF("AcousticShield firmware boot");
+	LOG_INF("Haven firmware boot");
 
 	int err = adau1860_init();
 

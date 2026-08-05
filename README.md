@@ -1,6 +1,6 @@
-# nrf52_acousticshield_fw
+# nrf52_haven_fw
 
-Production firmware for **Project AcousticShield**: an nRF52 acts as the BLE
+Production firmware for **Project Haven**: an nRF52 acts as the BLE
 peripheral for the companion app and as I2C/SPI control-port master to an
 **ADAU1860** audio DSP. Successor to the validated `teensy_hearing_shield`
 prototype.
@@ -11,7 +11,7 @@ prototype.
 Mobile app (react-native-ble-plx)
     │  Nordic UART Service, newline-terminated JSON, MTU 247
     ▼
-ble_transport.c   — NUS peripheral "AcousticShield", line reassembly
+ble_transport.c   — NUS peripheral "Haven", line reassembly
     ▼
 protocol.c        — fixed-schema JSON parser (MULTI_FILTER / BYPASS), clamps
     ▼

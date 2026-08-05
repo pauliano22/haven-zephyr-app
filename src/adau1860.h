@@ -8,8 +8,8 @@
  * the production PCB arrives and the SigmaStudio+ program layout (parameter
  * RAM addresses for each biquad stage) is exported.
  */
-#ifndef ACOUSTICSHIELD_ADAU1860_H_
-#define ACOUSTICSHIELD_ADAU1860_H_
+#ifndef HAVEN_ADAU1860_H_
+#define HAVEN_ADAU1860_H_
 
 #include <stdbool.h>
 #include <stddef.h>
@@ -40,4 +40,4 @@ int adau1860_apply_filters(const struct filter_band *bands, size_t count);
 /* True = audio passes through unprocessed. */
 int adau1860_set_bypass(bool enabled);
 
-#endif /* ACOUSTICSHIELD_ADAU1860_H_ */
+#endif /* HAVEN_ADAU1860_H_ */

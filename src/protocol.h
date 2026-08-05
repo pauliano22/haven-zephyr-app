@@ -1,4 +1,4 @@
-/* JSON control protocol shared with the AcousticShield mobile app.
+/* JSON control protocol shared with the Haven mobile app.
  *
  * Messages arrive over NUS as newline-terminated JSON:
  *   {"type":"MULTI_FILTER","bands":[{"f0":4500,"Q":10.0}, ...]}   (1..5 bands)
@@ -7,8 +7,8 @@
  * Bands may optionally carry "atten_db" (positive dB of reduction) once the
  * app's dynamic-dampening feature ships; absent means full notch.
  */
-#ifndef ACOUSTICSHIELD_PROTOCOL_H_
-#define ACOUSTICSHIELD_PROTOCOL_H_
+#ifndef HAVEN_PROTOCOL_H_
+#define HAVEN_PROTOCOL_H_
 
 #include <stdbool.h>
 #include <stddef.h>
@@ -48,4 +48,4 @@ struct dsp_command {
  */
 int protocol_parse_line(const char *line, struct dsp_command *cmd);
 
-#endif /* ACOUSTICSHIELD_PROTOCOL_H_ */
+#endif /* HAVEN_PROTOCOL_H_ */

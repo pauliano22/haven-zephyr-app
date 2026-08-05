@@ -1,4 +1,4 @@
-/* Minimal, allocation-free parser for the fixed AcousticShield JSON schema.
+/* Minimal, allocation-free parser for the fixed Haven JSON schema.
  *
  * Deliberately not a general JSON parser: the app is the only producer and
  * emits a known shape, so we scan for the keys we care about and clamp every
