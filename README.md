@@ -84,7 +84,8 @@ against your exact DK revision first (see the overlay's own comments).
 ## CI
 
 `.github/workflows/build.yml` runs this same build (nRF5340 DK, app core,
-with sysbuild) on every push to `main` and on pull requests targeting it.
+with sysbuild) on every push to `master` (this repo's default branch) and
+on pull requests targeting it.
 
 ## Status
 
