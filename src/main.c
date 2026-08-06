@@ -1,4 +1,4 @@
-/* Haven nRF52 firmware
+/* Haven nRF5340 firmware
  *
  * Pipeline: NUS write → line assembler → protocol_parse_line() → ADAU1860
  * driver. Parsing and DSP dispatch run on the system workqueue via the BLE
@@ -7,7 +7,7 @@
 #include <zephyr/kernel.h>
 #include <zephyr/logging/log.h>
 
-#include "adau1860.h"
+#include "adau1860_control.h"
 #include "ble_transport.h"
 #include "protocol.h"
 
@@ -26,11 +26,11 @@ static void handle_line(const char *line)
 	switch (cmd.type) {
 	case DSP_CMD_MULTI_FILTER:
 		LOG_INF("MULTI_FILTER: %u band(s)", cmd.band_count);
-		adau1860_set_bypass(false);
-		adau1860_apply_filters(cmd.bands, cmd.band_count);
+		adau1860_control_set_bypass(false);
+		adau1860_control_apply_filters(cmd.bands, cmd.band_count);
 		break;
 	case DSP_CMD_BYPASS:
-		adau1860_set_bypass(cmd.bypass_enabled);
+		adau1860_control_set_bypass(cmd.bypass_enabled);
 		break;
 	default:
 		break;
@@ -41,11 +41,14 @@ int main(void)
 {
 	LOG_INF("Haven firmware boot");
 
-	int err = adau1860_init();
+	int err = adau1860_control_init();
 
 	if (err) {
-		LOG_ERR("ADAU1860 init failed (err %d)", err);
+		LOG_ERR("ADAU1860 control init failed (err %d)", err);
 	}
+
+	ble_transport_set_conn_callbacks(adau1860_control_on_ble_connected,
+					  adau1860_control_on_ble_disconnected);
 
 	err = ble_transport_init(handle_line);
 	if (err) {

@@ -1,34 +1,42 @@
-#include "adau1860.h"
+#include "adau1860_control.h"
 
 #include <math.h>
 
 #include <zephyr/kernel.h>
 #include <zephyr/logging/log.h>
+#include <zephyr/drivers/i2c.h>
 
-LOG_MODULE_REGISTER(adau1860, LOG_LEVEL_INF);
+LOG_MODULE_REGISTER(adau1860_control, LOG_LEVEL_INF);
 
 #define ADAU1860_SAMPLE_RATE_HZ 48000.0f
 
-/* ── Bus placeholders ───────────────────────────────────────────────────────
- * TODO(hw-bringup): bind to the devicetree nodes (adi,adau1860 on i2c0 and
- * adi,adau1860-spi on spi1) and implement the real control-port transactions,
- * including the safeload handshake for glitch-free coefficient swaps.
+/* ── Bus binding ─────────────────────────────────────────────────────────
+ * Resolved from the "adau1860" child node declared under &i2c1 in
+ * boards/nrf5340dk_nrf5340_cpuapp.overlay. I2C_DT_SPEC_GET works without a
+ * dedicated Zephyr driver binding for the ADAU1860 itself — it only needs a
+ * `reg` property and a bus parent with a real driver (nordic,nrf-twim).
  */
+static const struct i2c_dt_spec adau1860_i2c = I2C_DT_SPEC_GET(DT_NODELABEL(adau1860));
 
-static int adau1860_i2c_write(uint16_t reg, const uint8_t *data, size_t len)
+/* TODO(hw-bringup): implement the safeload handshake for glitch-free
+ * coefficient swaps once the register map is known. This currently performs
+ * a real I2C write of whatever bytes are handed to it, with no framing.
+ */
+static int adau1860_i2c_write(const uint8_t *data, size_t len)
 {
-	LOG_DBG("I2C write [placeholder]: reg 0x%04x, %u bytes", reg,
-		(unsigned int)len);
-	return 0;
+	int err = i2c_write_dt(&adau1860_i2c, data, len);
+
+	if (err) {
+		LOG_DBG("I2C write failed (err %d), %u bytes", err, (unsigned int)len);
+	}
+	return err;
 }
 
-static int adau1860_spi_burst_write(uint32_t addr, const uint8_t *data,
-				    size_t len)
-{
-	LOG_DBG("SPI burst [placeholder]: addr 0x%08x, %u bytes", addr,
-		(unsigned int)len);
-	return 0;
-}
+/* TODO(hw-bringup): the audio data path (I2S0, see the overlay) still needs
+ * a driver-level init once the ADAU1860's required PCM format (sample width,
+ * frame clock polarity, channel count) is confirmed from the datasheet /
+ * SigmaStudio+ export. Not wired yet — control plane comes first.
+ */
 
 /* ── Coefficient math ───────────────────────────────────────────────────────
  * Same RBJ cookbook math validated on the Teensy prototype and in
@@ -66,16 +74,23 @@ static void calc_band_coeffs(const struct filter_band *band,
 
 /* ── Public API ─────────────────────────────────────────────────────────────*/
 
-int adau1860_init(void)
+int adau1860_control_init(void)
 {
+	if (!device_is_ready(adau1860_i2c.bus)) {
+		LOG_ERR("I2C1 bus not ready");
+		return -ENODEV;
+	}
+
 	/* TODO(hw-bringup): read CHIP_ID register, verify, release HIBERNATE,
-	 * SPI-download the SigmaStudio+ program image, start the DSP core.
+	 * SPI-download or I2C-stream the SigmaStudio+ program image, start
+	 * the DSP core.
 	 */
-	LOG_INF("ADAU1860 init [placeholder] — no hardware transactions yet");
+	LOG_INF("ADAU1860 control init: I2C1 bus ready, addr 0x%02x [no register "
+		"transactions yet]", adau1860_i2c.addr);
 	return 0;
 }
 
-int adau1860_apply_filters(const struct filter_band *bands, size_t count)
+int adau1860_control_apply_filters(const struct filter_band *bands, size_t count)
 {
 	if (count > PROTOCOL_MAX_BANDS) {
 		count = PROTOCOL_MAX_BANDS;
@@ -91,8 +106,10 @@ int adau1860_apply_filters(const struct filter_band *bands, size_t count)
 			(double)bands[i].atten_db);
 
 		/* TODO(hw-bringup): convert c to the DSP's coefficient format
-		 * and safeload into the parameter RAM slot for stage i:
-		 *   adau1860_i2c_write(PARAM_RAM_STAGE(i), coeff_bytes, len);
+		 * and safeload into the parameter RAM slot for stage i, e.g.:
+		 *   uint8_t frame[PARAM_FRAME_LEN];
+		 *   encode_param_ram_write(PARAM_RAM_STAGE(i), &c, frame);
+		 *   adau1860_i2c_write(frame, sizeof(frame));
 		 */
 		ARG_UNUSED(c);
 	}
@@ -101,13 +118,22 @@ int adau1860_apply_filters(const struct filter_band *bands, size_t count)
 	 * unused cascade stages so stale filters don't linger.
 	 */
 	(void)adau1860_i2c_write;
-	(void)adau1860_spi_burst_write;
 	return 0;
 }
 
-int adau1860_set_bypass(bool enabled)
+int adau1860_control_set_bypass(bool enabled)
 {
 	/* TODO(hw-bringup): flip the DSP program's bypass mux register. */
 	LOG_INF("Bypass [placeholder]: %s", enabled ? "ENABLED" : "disabled");
 	return 0;
+}
+
+void adau1860_control_on_ble_connected(void)
+{
+	LOG_INF("BLE connected [placeholder] — no DSP state change yet");
+}
+
+void adau1860_control_on_ble_disconnected(void)
+{
+	LOG_INF("BLE disconnected [placeholder] — no DSP state change yet");
 }

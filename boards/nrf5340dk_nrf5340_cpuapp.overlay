@@ -1,0 +1,33 @@
+/*
+ * nRF5340 DK wiring for the ADAU1860 DSP — application core.
+ *
+ * Control port : I2C1 (Arduino-header pins on the DK; ADAU1860 at 0x28 with
+ *                ADDR0/ADDR1 low)
+ * Audio data   : I2S0 (multichannel PCM to/from the DSP)
+ *
+ * This enables the DK's own default pin mapping for each peripheral rather
+ * than hand-specifying pinctrl — there is no production PCB yet. Once the
+ * Haven dev board schematic lands, replace this file's bus choice and add a
+ * board-specific overlay alongside it; don't edit pins here blind.
+ *
+ * NOTE: confirm i2c1 is in fact the Arduino-header bus for your exact NCS/
+ * Zephyr version before wiring real hardware to the DK — Nordic DK bus
+ * numbering has occasionally shifted between SDK releases and board
+ * revisions. i2c0 is the fallback if i2c1 turns out to be reserved for an
+ * onboard peripheral on this revision.
+ */
+
+&i2c1 {
+	status = "okay";
+	clock-frequency = <I2C_BITRATE_FAST>;
+
+	adau1860: adau1860@28 {
+		compatible = "adi,adau1860";
+		reg = <0x28>;
+		status = "okay";
+	};
+};
+
+&i2s0 {
+	status = "okay";
+};

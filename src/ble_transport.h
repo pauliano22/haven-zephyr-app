@@ -10,6 +10,15 @@
 /* Called from the system workqueue with a NUL-terminated line ('\n' removed). */
 typedef void (*ble_line_cb_t)(const char *line);
 
+/* Fired on BLE connect/disconnect, from the Bluetooth connection callback
+ * context (not the system workqueue) — keep handlers short and non-blocking.
+ */
+typedef void (*ble_conn_event_cb_t)(void);
+
+/* Optional: register link lifecycle callbacks. Call before ble_transport_init(). */
+void ble_transport_set_conn_callbacks(ble_conn_event_cb_t on_connected,
+				       ble_conn_event_cb_t on_disconnected);
+
 int ble_transport_init(ble_line_cb_t line_cb);
 
 /* Optional device -> app notification (status/acks) over NUS TX. */

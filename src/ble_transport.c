@@ -15,6 +15,8 @@ LOG_MODULE_REGISTER(ble_transport, LOG_LEVEL_INF);
 #define LINE_BUF_SIZE 512
 
 static ble_line_cb_t line_handler;
+static ble_conn_event_cb_t connected_handler;
+static ble_conn_event_cb_t disconnected_handler;
 static struct bt_conn *current_conn;
 
 static char line_buf[LINE_BUF_SIZE];
@@ -94,6 +96,9 @@ static void connected(struct bt_conn *conn, uint8_t err)
 	line_len = 0;
 	line_overflow = false;
 	LOG_INF("Phone connected");
+	if (connected_handler) {
+		connected_handler();
+	}
 }
 
 static void disconnected(struct bt_conn *conn, uint8_t reason)
@@ -102,6 +107,9 @@ static void disconnected(struct bt_conn *conn, uint8_t reason)
 	if (current_conn) {
 		bt_conn_unref(current_conn);
 		current_conn = NULL;
+	}
+	if (disconnected_handler) {
+		disconnected_handler();
 	}
 	/* The app auto-reconnects; be discoverable again immediately. */
 	start_advertising();
@@ -113,6 +121,13 @@ BT_CONN_CB_DEFINE(conn_callbacks) = {
 };
 
 /* ── Public API ─────────────────────────────────────────────────────────────*/
+
+void ble_transport_set_conn_callbacks(ble_conn_event_cb_t on_connected,
+				       ble_conn_event_cb_t on_disconnected)
+{
+	connected_handler = on_connected;
+	disconnected_handler = on_disconnected;
+}
 
 int ble_transport_init(ble_line_cb_t line_cb)
 {
