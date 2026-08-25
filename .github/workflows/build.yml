@@ -28,6 +28,15 @@ jobs:
     runs-on: ubuntu-latest
     container:
       image: ghcr.io/zephyrproject-rtos/ci:v0.29.3
+    env:
+      # The image bundles the Zephyr SDK (confirmed: Zephyr-sdk 1.0 is
+      # what CMake went looking for, build 32873026416) but doesn't
+      # export its location for CMake's find_package(Zephyr-sdk) to see
+      # on its own -- has to be told explicitly. /opt/toolchains is the
+      # documented install path for this image family (see
+      # interrupt.memfault.com/blog/ncs-github-actions for a working
+      # example against the same zephyrproject-rtos/ci image line).
+      CMAKE_PREFIX_PATH: /opt/toolchains
 
     steps:
       - name: Checkout haven_zephyr_app
