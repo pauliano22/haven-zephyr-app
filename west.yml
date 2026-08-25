@@ -1,0 +1,25 @@
+# West manifest for haven_zephyr_app as a standalone out-of-tree NCS
+# application. Importing `nrf` pulls in the full nRF Connect SDK manifest
+# (Zephyr, hal_nordic, etc.) at the pinned revision below, which is what lets
+# `west init -l haven_zephyr_app` (see README.md) work without this repo
+# vendoring any SDK code itself.
+#
+# NOTE: `revision` is pinned to the latest NCS release known at the time this
+# file was written. Match it to whatever version nRF Connect for VS Code's
+# Toolchain Manager actually installed on your machine (Toolchain Manager ->
+# your install -> version string) before running `west update` — a mismatch
+# won't fail loudly, it'll just fetch a different SDK version than the
+# toolchain you have.
+manifest:
+  remotes:
+    - name: ncs
+      url-base: https://github.com/nrfconnect
+
+  projects:
+    - name: nrf
+      remote: ncs
+      revision: v3.4.0
+      import: true
+
+  self:
+    path: haven_zephyr_app

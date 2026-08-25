@@ -2,6 +2,12 @@
 
 #include <math.h>
 
+/* picolibc's math.h only exposes M_PI under a feature-test macro that
+ * -std=c17 doesn't define. */
+#ifndef M_PI
+#define M_PI 3.14159265358979323846f
+#endif
+
 #include <zephyr/kernel.h>
 #include <zephyr/logging/log.h>
 #include <zephyr/drivers/i2c.h>
