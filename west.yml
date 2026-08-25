@@ -10,6 +10,17 @@
 # your install -> version string) before running `west update` — a mismatch
 # won't fail loudly, it'll just fetch a different SDK version than the
 # toolchain you have.
+#
+# NOTE: `repo-path: sdk-nrf` is required -- the actual GitHub repo is
+# nrfconnect/sdk-nrf (renamed from fw-nrfconnect-nrf pre-NCS-1.3.0);
+# `nrfconnect/nrf` hasn't existed for years. `name: nrf` still has to stay
+# literally "nrf" though: that's what NCS's own manifest-import convention
+# keys off of (`import: true` on a project named exactly `nrf`) and what
+# the local checkout directory is named. Caught via CI (build 32871505752)
+# — this was a real dormant bug, not a CI-environment issue: local builds
+# never actually exercised this manifest from scratch, always pointing
+# `west build` at a pre-existing NCS checkout set up via the official
+# Toolchain Manager instead, which already used the correct path.
 manifest:
   remotes:
     - name: ncs
@@ -17,6 +28,7 @@ manifest:
 
   projects:
     - name: nrf
+      repo-path: sdk-nrf
       remote: ncs
       revision: v3.4.0
       import: true

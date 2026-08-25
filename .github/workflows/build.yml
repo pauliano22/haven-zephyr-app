@@ -30,46 +30,16 @@ jobs:
       image: ghcr.io/zephyrproject-rtos/ci:v0.29.3
 
     steps:
-      # persist-credentials: false is the actual fix for the two attempts
-      # below it in git history -- actions/checkout@v4 injects its fetch
-      # token via GIT_CONFIG_COUNT/GIT_CONFIG_KEY_n/GIT_CONFIG_VALUE_n
-      # *environment variables*, not a gitconfig file, so `git config
-      # --unset` (build 32869642761) can't touch it -- it persists across
-      # every step in the job regardless, intercepting west's later
-      # anonymous clone of the public nrfconnect/nrf repo with no TTY to
-      # satisfy the resulting auth prompt ("could not read Username",
-      # builds 32865090917 and 32869642761). Routing it through
-      # GITHUB_TOKEN instead made it worse ("Repository not found", build
-      # 32868435790) -- that token is scoped only to *this* repo. Telling
-      # checkout not to persist credentials at all sidesteps every variant
-      # of this at the source; nothing later in the job needs to
-      # authenticate back to this repo.
       - name: Checkout haven_zephyr_app
         uses: actions/checkout@v4
         with:
           path: haven_zephyr_app
+          # Least-privilege only -- not the fix for the west failures this
+          # repo's git history chased through several commits. The real
+          # cause was a wrong repo path in west.yml (see its own NOTE); a
+          # diagnostic step proved anonymous git access itself was fine
+          # the whole time.
           persist-credentials: false
-
-      # TEMP DIAGNOSTIC: three straight fixes for "could not read Username"
-      # (unset the extraheader, persist-credentials: false, routing through
-      # GITHUB_TOKEN) all failed identically or worse -- pointing away from
-      # actions/checkout's credential injection as the actual cause. Before
-      # guessing a fourth time, capture what's really configured. Remove
-      # once the real cause is found.
-      - name: DIAGNOSTIC - git/env state
-        run: |
-          echo "--- git config --list --show-origin ---"
-          git config --list --show-origin || true
-          echo "--- GIT_*/CI env vars ---"
-          env | grep -E '^GIT_|^CI$|^GITHUB_ACTIONS$' || true
-          echo "--- git version ---"
-          git --version
-          echo "--- bare anonymous ls-remote, no flags at all ---"
-          git ls-remote https://github.com/nrfconnect/nrf HEAD || echo "FAILED exit $?"
-          echo "--- same, against a smaller/less-trafficked public repo (rules out per-repo abuse throttling) ---"
-          git ls-remote https://github.com/zephyrproject-rtos/example-application HEAD || echo "FAILED exit $?"
-          echo "--- curl the same URL raw, to see the actual HTTP status/headers git is reacting to ---"
-          curl -sS -D - -o /dev/null "https://github.com/nrfconnect/nrf.git/info/refs?service=git-upload-pack" || echo "curl FAILED exit $?"
 
       - name: Initialize west workspace
         run: |
