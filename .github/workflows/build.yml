@@ -50,6 +50,23 @@ jobs:
           path: haven_zephyr_app
           persist-credentials: false
 
+      # TEMP DIAGNOSTIC: three straight fixes for "could not read Username"
+      # (unset the extraheader, persist-credentials: false, routing through
+      # GITHUB_TOKEN) all failed identically or worse -- pointing away from
+      # actions/checkout's credential injection as the actual cause. Before
+      # guessing a fourth time, capture what's really configured. Remove
+      # once the real cause is found.
+      - name: DIAGNOSTIC - git/env state
+        run: |
+          echo "--- git config --list --show-origin ---"
+          git config --list --show-origin || true
+          echo "--- GIT_*/CI env vars ---"
+          env | grep -E '^GIT_|^CI$|^GITHUB_ACTIONS$' || true
+          echo "--- raw anonymous ls-remote (bypassing west) ---"
+          git -c http.extraheader= ls-remote https://github.com/nrfconnect/nrf HEAD || true
+          echo "--- git version ---"
+          git --version
+
       - name: Initialize west workspace
         run: |
           west init -l haven_zephyr_app
