@@ -41,6 +41,29 @@
 </section>
 
 <section>
+  <h2>Raw NUS JSON (production protocol)</h2>
+  <p style="font-size:0.85rem;color:#555;margin-top:0">
+    Sends a line straight to the RX characteristic, exactly like the app does —
+    <code>protocol.c</code>'s actual parser, not the bench GATT service above.
+    Useful for exercising MULTI_FILTER/BYPASS/TONE_* without a phone build.
+  </p>
+  <label>JSON line</label>
+  <input type="text" id="nusInput" style="width:100%" value='{"type":"TONE_START","f0":4000,"level_db":30}'>
+  <button id="nusSendBtn" disabled>Send</button>
+  <div style="margin-top:0.75rem">
+    <button id="toneStartBtn" disabled>TONE_START f0=4000 level=30</button>
+    <button id="toneLevelBtn" disabled>TONE_LEVEL (keep-alive) level=<span id="toneLevelVal">30</span></button>
+    <input type="number" id="toneLevelInput" value="30" style="width:4rem">
+    <button id="toneStopBtn" disabled>TONE_STOP</button>
+  </div>
+  <p style="font-size:0.85rem;color:#555">
+    Watchdog test: TONE_START, then just wait &gt;3s without clicking
+    TONE_LEVEL — RTT should show <code>tone_safety: Tone watchdog fired</code>
+    and the tone auto-stops on its own.
+  </p>
+</section>
+
+<section>
   <h2>Log</h2>
   <div id="log"></div>
 </section>
@@ -50,14 +73,24 @@ const SERVICE_UUID       = '7a1e0001-4b5c-4e8a-9c1a-2f6b8d3c9a10';
 const VOLUME_CHAR_UUID   = '7a1e0002-4b5c-4e8a-9c1a-2f6b8d3c9a10';
 const FREQ_CHAR_UUID     = '7a1e0003-4b5c-4e8a-9c1a-2f6b8d3c9a10';
 
+// Nordic UART Service -- the production protocol's transport (see
+// haven-app's src/constants/ble.ts). Not our custom service; this is the
+// same characteristic the real app writes JSON to.
+const NUS_SERVICE_UUID  = '6e400001-b5a3-f393-e0a9-e50e24dcca9e';
+const NUS_RX_CHAR_UUID  = '6e400002-b5a3-f393-e0a9-e50e24dcca9e';
+
 const statusEl = document.getElementById('status');
 const logEl = document.getElementById('log');
 const volumeValEl = document.getElementById('volumeVal');
 const freqValEl = document.getElementById('freqVal');
 const volumeSetBtn = document.getElementById('volumeSetBtn');
 const freqSetBtn = document.getElementById('freqSetBtn');
+const nusSendBtn = document.getElementById('nusSendBtn');
+const toneStartBtn = document.getElementById('toneStartBtn');
+const toneLevelBtn = document.getElementById('toneLevelBtn');
+const toneStopBtn = document.getElementById('toneStopBtn');
 
-let volumeChar, freqChar;
+let volumeChar, freqChar, nusRxChar;
 
 function log(msg, cls) {
   const line = document.createElement('div');
@@ -97,13 +130,17 @@ async function connect() {
       // connecting. optionalServices is required by Web Bluetooth to
       // permit GATT access to a non-standard service post-connection.
       filters: [{ name: 'Haven' }],
-      optionalServices: [SERVICE_UUID],
+      optionalServices: [SERVICE_UUID, NUS_SERVICE_UUID],
     });
 
     device.addEventListener('gattserverdisconnected', () => {
       setStatus('Disconnected', 'err');
       volumeSetBtn.disabled = true;
       freqSetBtn.disabled = true;
+      nusSendBtn.disabled = true;
+      toneStartBtn.disabled = true;
+      toneLevelBtn.disabled = true;
+      toneStopBtn.disabled = true;
       log('Device disconnected', 'err');
     });
 
@@ -113,6 +150,9 @@ async function connect() {
 
     volumeChar = await service.getCharacteristic(VOLUME_CHAR_UUID);
     freqChar = await service.getCharacteristic(FREQ_CHAR_UUID);
+
+    const nusService = await server.getPrimaryService(NUS_SERVICE_UUID);
+    nusRxChar = await nusService.getCharacteristic(NUS_RX_CHAR_UUID);
 
     const volumeVal = await volumeChar.readValue();
     volumeValEl.textContent = `${volumeVal.getUint8(0)}%`;
@@ -137,6 +177,10 @@ async function connect() {
     setStatus(`Connected: ${device.name || device.id}`, 'ok');
     volumeSetBtn.disabled = false;
     freqSetBtn.disabled = false;
+    nusSendBtn.disabled = false;
+    toneStartBtn.disabled = false;
+    toneLevelBtn.disabled = false;
+    toneStopBtn.disabled = false;
     log('Connected and subscribed to notifications.', 'ok');
   } catch (err) {
     setStatus('Connection failed', 'err');
@@ -171,9 +215,31 @@ async function setFreqRange() {
   }
 }
 
+async function sendNusLine(line) {
+  log(`NUS >> ${line}`);
+  try {
+    // Firmware frames on '\n' -- see ble_transport.c's line assembler.
+    await nusRxChar.writeValueWithResponse(new TextEncoder().encode(line + '\n'));
+    log(`NUS sent`, 'ok');
+  } catch (err) {
+    log(`NUS write failed: ${err.message}`, 'err');
+  }
+}
+
 document.getElementById('connectBtn').addEventListener('click', connect);
 volumeSetBtn.addEventListener('click', setVolume);
 freqSetBtn.addEventListener('click', setFreqRange);
+nusSendBtn.addEventListener('click', () => sendNusLine(document.getElementById('nusInput').value));
+toneStartBtn.addEventListener('click', () => {
+  const level = document.getElementById('toneLevelInput').value;
+  sendNusLine(`{"type":"TONE_START","f0":4000,"level_db":${level}}`);
+});
+toneLevelBtn.addEventListener('click', () => {
+  const level = document.getElementById('toneLevelInput').value;
+  document.getElementById('toneLevelVal').textContent = level;
+  sendNusLine(`{"type":"TONE_LEVEL","level_db":${level}}`);
+});
+toneStopBtn.addEventListener('click', () => sendNusLine('{"type":"TONE_STOP"}'));
 
 // Chrome silently changes a focused <input type=number>'s value when the
 // mouse wheel scrolls over it -- blur on wheel so an incidental scroll

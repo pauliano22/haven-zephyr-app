@@ -134,6 +134,36 @@ int adau1860_control_set_bypass(bool enabled)
 	return 0;
 }
 
+int adau1860_control_set_tone(float f0_hz, float level_db)
+{
+	/* TODO(hw-bringup): program the DSP's tone generator (frequency +
+	 * output gain register) once the SigmaStudio+ program layout for it
+	 * is known. Caller (tone_safety.c) has already clamped level_db to
+	 * PROTOCOL_TONE_LEVEL_MAX_DB.
+	 */
+	LOG_INF("Tone [placeholder]: f0=%.1f Hz level=%.1f dB", (double)f0_hz,
+		(double)level_db);
+	return 0;
+}
+
+int adau1860_control_set_tone_level(float level_db)
+{
+	/* TODO(hw-bringup): update just the tone generator's output gain
+	 * register, leaving frequency untouched.
+	 */
+	LOG_INF("Tone level [placeholder]: %.1f dB", (double)level_db);
+	return 0;
+}
+
+int adau1860_control_stop_tone(void)
+{
+	/* TODO(hw-bringup): mute the tone generator specifically, without
+	 * otherwise disturbing the main filter/bypass signal path.
+	 */
+	LOG_INF("Tone stop [placeholder]");
+	return 0;
+}
+
 void adau1860_control_on_ble_connected(void)
 {
 	LOG_INF("BLE connected [placeholder] — no DSP state change yet");

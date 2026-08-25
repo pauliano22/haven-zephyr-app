@@ -41,6 +41,16 @@ int adau1860_control_apply_filters(const struct filter_band *bands, size_t count
 /* True = audio passes through unprocessed. */
 int adau1860_control_set_bypass(bool enabled);
 
+/* ── LDL calibration tone ─────────────────────────────────────────────────
+ * Safety-critical -- see tone_safety.c, which owns validation/clamping and
+ * the auto-stop watchdog. These are the raw hardware actions only; nothing
+ * here enforces the level ceiling itself (that already happened by the
+ * time a caller reaches these).
+ */
+int adau1860_control_set_tone(float f0_hz, float level_db);
+int adau1860_control_set_tone_level(float level_db);
+int adau1860_control_stop_tone(void);
+
 /* ── BLE communication callbacks ─────────────────────────────────────────
  * Hooks for behavior that should react to the link itself, not a specific
  * parsed command — e.g. muting or holding last-known-good coefficients on

@@ -12,4 +12,5 @@ target_sources(app PRIVATE
   src/gatt_audio_service.c
   src/mock_audio_pipeline.c
   src/settings_store.c
+  src/tone_safety.c
 )

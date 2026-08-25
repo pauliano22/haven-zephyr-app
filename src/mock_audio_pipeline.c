@@ -137,7 +137,14 @@ static void pipeline_tick(struct k_work *work)
 	generate_test_tone(buf, MOCK_BUFFER_LEN);
 	float peak_out = process_buffer(buf, MOCK_BUFFER_LEN);
 
-	LOG_INF("Pipeline tick: %u samples @ %uHz test tone, gain=x%.2f, "
+	/* LOG_DBG, not LOG_INF: this fires forever, every tick, whether or not
+	 * anything changed -- at LOG_INF it silently exhausts the RTT buffer
+	 * during any interactive session longer than a few minutes (bit rate
+	 * math: even the 16KB buffer filled solid with nothing but these
+	 * before a real multi-step BLE test ever got logged). Recomputes/gain
+	 * updates above are the actual events and stay at LOG_INF.
+	 */
+	LOG_DBG("Pipeline tick: %u samples @ %uHz test tone, gain=x%.2f, "
 		"band=[%u,%u]Hz, peak_out=%.3f", MOCK_BUFFER_LEN,
 		(unsigned int)MOCK_TEST_TONE_HZ, (double)current_gain,
 		current_range.lower_hz, current_range.upper_hz, (double)peak_out);

@@ -13,6 +13,7 @@
 #include "mock_audio_pipeline.h"
 #include "protocol.h"
 #include "settings_store.h"
+#include "tone_safety.h"
 
 LOG_MODULE_REGISTER(main, LOG_LEVEL_INF);
 
@@ -35,9 +36,30 @@ static void handle_line(const char *line)
 	case DSP_CMD_BYPASS:
 		adau1860_control_set_bypass(cmd.bypass_enabled);
 		break;
+	case DSP_CMD_TONE_START:
+		tone_safety_start(cmd.tone_f0_hz, cmd.tone_level_db);
+		break;
+	case DSP_CMD_TONE_LEVEL:
+		tone_safety_set_level(cmd.tone_level_db);
+		break;
+	case DSP_CMD_TONE_STOP:
+		tone_safety_stop();
+		break;
 	default:
 		break;
 	}
+}
+
+/* Losing the BLE link must silence any active tone immediately, the same
+ * way haven-app's own useLdlTone does on its side (docs/safety.md) --
+ * independently, not because the app told us to. A plain wrapper here
+ * (rather than teaching adau1860_control.c about tone_safety.c) keeps that
+ * module's only dependency on tone_safety.h one-directional.
+ */
+static void on_ble_disconnected(void)
+{
+	adau1860_control_on_ble_disconnected();
+	tone_safety_stop();
 }
 
 int main(void)
@@ -51,7 +73,7 @@ int main(void)
 	}
 
 	ble_transport_set_conn_callbacks(adau1860_control_on_ble_connected,
-					  adau1860_control_on_ble_disconnected);
+					  on_ble_disconnected);
 
 	err = ble_transport_init(handle_line);
 	if (err) {

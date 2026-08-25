@@ -129,6 +129,37 @@ static int parse_bypass(const char *line, struct dsp_command *cmd)
 	return 0;
 }
 
+/* level_db is safety-critical (drives the LDL calibration tone) -- clamped
+ * independently of whatever the app already clamped it to. See protocol.h.
+ */
+static int parse_tone_start(const char *line, struct dsp_command *cmd)
+{
+	float f0, level;
+
+	if (parse_number_field(line, NULL, "\"f0\"", &f0) == NULL ||
+	    parse_number_field(line, NULL, "\"level_db\"", &level) == NULL) {
+		return -EINVAL;
+	}
+	cmd->tone_f0_hz = clampf(f0, PROTOCOL_F0_MIN_HZ, PROTOCOL_F0_MAX_HZ);
+	cmd->tone_level_db = clampf(level, PROTOCOL_TONE_LEVEL_MIN_DB,
+				   PROTOCOL_TONE_LEVEL_MAX_DB);
+	cmd->type = DSP_CMD_TONE_START;
+	return 0;
+}
+
+static int parse_tone_level(const char *line, struct dsp_command *cmd)
+{
+	float level;
+
+	if (parse_number_field(line, NULL, "\"level_db\"", &level) == NULL) {
+		return -EINVAL;
+	}
+	cmd->tone_level_db = clampf(level, PROTOCOL_TONE_LEVEL_MIN_DB,
+				   PROTOCOL_TONE_LEVEL_MAX_DB);
+	cmd->type = DSP_CMD_TONE_LEVEL;
+	return 0;
+}
+
 int protocol_parse_line(const char *line, struct dsp_command *cmd)
 {
 	memset(cmd, 0, sizeof(*cmd));
@@ -144,6 +175,16 @@ int protocol_parse_line(const char *line, struct dsp_command *cmd)
 	}
 	if (strstr(line, "\"BYPASS\"") != NULL) {
 		return parse_bypass(line, cmd);
+	}
+	if (strstr(line, "\"TONE_START\"") != NULL) {
+		return parse_tone_start(line, cmd);
+	}
+	if (strstr(line, "\"TONE_LEVEL\"") != NULL) {
+		return parse_tone_level(line, cmd);
+	}
+	if (strstr(line, "\"TONE_STOP\"") != NULL) {
+		cmd->type = DSP_CMD_TONE_STOP;
+		return 0;
 	}
 	return -EINVAL;
 }
