@@ -62,10 +62,14 @@ jobs:
           git config --list --show-origin || true
           echo "--- GIT_*/CI env vars ---"
           env | grep -E '^GIT_|^CI$|^GITHUB_ACTIONS$' || true
-          echo "--- raw anonymous ls-remote (bypassing west) ---"
-          git -c http.extraheader= ls-remote https://github.com/nrfconnect/nrf HEAD || true
           echo "--- git version ---"
           git --version
+          echo "--- bare anonymous ls-remote, no flags at all ---"
+          git ls-remote https://github.com/nrfconnect/nrf HEAD || echo "FAILED exit $?"
+          echo "--- same, against a smaller/less-trafficked public repo (rules out per-repo abuse throttling) ---"
+          git ls-remote https://github.com/zephyrproject-rtos/example-application HEAD || echo "FAILED exit $?"
+          echo "--- curl the same URL raw, to see the actual HTTP status/headers git is reacting to ---"
+          curl -sS -D - -o /dev/null "https://github.com/nrfconnect/nrf.git/info/refs?service=git-upload-pack" || echo "curl FAILED exit $?"
 
       - name: Initialize west workspace
         run: |
