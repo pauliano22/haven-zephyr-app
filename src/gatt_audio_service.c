@@ -7,6 +7,9 @@
 #include <zephyr/bluetooth/conn.h>
 #include <zephyr/bluetooth/uuid.h>
 #include <zephyr/bluetooth/gatt.h>
+#include <zephyr/settings/settings.h>
+
+#include "settings_store.h"
 
 LOG_MODULE_REGISTER(gatt_audio_service, LOG_LEVEL_INF);
 
@@ -65,9 +68,37 @@ static ssize_t read_volume(struct bt_conn *conn, const struct bt_gatt_attr *attr
 				 sizeof(current_volume_pct));
 }
 
+/* Shared by write_volume() (post-validation) and gatt_audio_set_volume()
+ * (trusted callers, e.g. settings restore) -- everything except the ATT
+ * validation and the flash write.
+ */
+static void apply_volume(uint8_t value)
+{
+	current_volume_pct = value;
+	LOG_INF("Volume set: %u%%", current_volume_pct);
+
+	if (volume_notify_enabled) {
+		/* attrs[2] = this characteristic's value attribute — see the
+		 * BT_GATT_SERVICE_DEFINE layout below (decl, value, CCC).
+		 */
+		bt_gatt_notify(NULL, &haven_audio_svc.attrs[2], &current_volume_pct,
+			      sizeof(current_volume_pct));
+	}
+	if (volume_changed_cb) {
+		volume_changed_cb(current_volume_pct);
+	}
+}
+
+void gatt_audio_set_volume(uint8_t volume_pct)
+{
+	apply_volume(volume_pct);
+}
+
 static ssize_t write_volume(struct bt_conn *conn, const struct bt_gatt_attr *attr,
 			    const void *buf, uint16_t len, uint16_t offset, uint8_t flags)
 {
+	ARG_UNUSED(conn);
+
 	if (offset != 0) {
 		return BT_GATT_ERR(BT_ATT_ERR_INVALID_OFFSET);
 	}
@@ -85,18 +116,12 @@ static ssize_t write_volume(struct bt_conn *conn, const struct bt_gatt_attr *att
 		return BT_GATT_ERR(BT_ATT_ERR_OUT_OF_RANGE);
 	}
 
-	current_volume_pct = requested;
-	LOG_INF("Volume set: %u%%", current_volume_pct);
+	apply_volume(requested);
 
-	if (volume_notify_enabled) {
-		/* attrs[2] = this characteristic's value attribute — see the
-		 * BT_GATT_SERVICE_DEFINE layout below (decl, value, CCC).
-		 */
-		bt_gatt_notify(conn, &haven_audio_svc.attrs[2], &current_volume_pct,
-			      sizeof(current_volume_pct));
-	}
-	if (volume_changed_cb) {
-		volume_changed_cb(current_volume_pct);
+	int rc = settings_save_one(SETTINGS_STORE_VOLUME_KEY, &current_volume_pct,
+				   sizeof(current_volume_pct));
+	if (rc) {
+		LOG_WRN("Failed to persist volume (err %d) -- applied, not saved", rc);
 	}
 
 	return len;
@@ -120,10 +145,39 @@ static ssize_t read_freq_range(struct bt_conn *conn, const struct bt_gatt_attr *
 	return bt_gatt_attr_read(conn, attr, buf, len, offset, wire, sizeof(wire));
 }
 
+/* Shared by write_freq_range() (post-validation) and
+ * gatt_audio_set_freq_range() (trusted callers, e.g. settings restore).
+ */
+static void apply_freq_range(const struct audio_freq_range *range)
+{
+	current_freq_range = *range;
+	LOG_INF("FreqRange set: [%u, %u] Hz", range->lower_hz, range->upper_hz);
+
+	if (freq_range_notify_enabled) {
+		uint8_t wire[4];
+
+		sys_put_le16(range->lower_hz, &wire[0]);
+		sys_put_le16(range->upper_hz, &wire[2]);
+		/* attrs[5] = this characteristic's value attribute. */
+		bt_gatt_notify(NULL, &haven_audio_svc.attrs[5], wire, sizeof(wire));
+	}
+	if (freq_range_changed_cb) {
+		freq_range_changed_cb(&current_freq_range);
+	}
+}
+
+void gatt_audio_set_freq_range(const struct audio_freq_range *range)
+{
+	apply_freq_range(range);
+}
+
 static ssize_t write_freq_range(struct bt_conn *conn, const struct bt_gatt_attr *attr,
 				const void *buf, uint16_t len, uint16_t offset, uint8_t flags)
 {
+	ARG_UNUSED(conn);
+
 	if (offset != 0) {
+		LOG_WRN("FreqRange write: nonzero offset %u", offset);
 		return BT_GATT_ERR(BT_ATT_ERR_INVALID_OFFSET);
 	}
 	if (len != 4) {
@@ -143,16 +197,14 @@ static ssize_t write_freq_range(struct bt_conn *conn, const struct bt_gatt_attr 
 		return BT_GATT_ERR(BT_ATT_ERR_OUT_OF_RANGE);
 	}
 
-	current_freq_range.lower_hz = lower_hz;
-	current_freq_range.upper_hz = upper_hz;
-	LOG_INF("FreqRange set: [%u, %u] Hz", lower_hz, upper_hz);
+	struct audio_freq_range range = { .lower_hz = lower_hz, .upper_hz = upper_hz };
 
-	if (freq_range_notify_enabled) {
-		/* attrs[5] = this characteristic's value attribute. */
-		bt_gatt_notify(conn, &haven_audio_svc.attrs[5], wire, sizeof(wire));
-	}
-	if (freq_range_changed_cb) {
-		freq_range_changed_cb(&current_freq_range);
+	apply_freq_range(&range);
+
+	int rc = settings_save_one(SETTINGS_STORE_FREQ_KEY, &current_freq_range,
+				   sizeof(current_freq_range));
+	if (rc) {
+		LOG_WRN("Failed to persist freq range (err %d) -- applied, not saved", rc);
 	}
 
 	return len;

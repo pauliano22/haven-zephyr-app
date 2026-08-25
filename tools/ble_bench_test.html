@@ -1,0 +1,191 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Haven BLE Bench Test</title>
+<style>
+  body { font-family: -apple-system, sans-serif; max-width: 640px; margin: 2rem auto; padding: 0 1rem; color: #222; }
+  h1 { font-size: 1.3rem; }
+  section { border: 1px solid #ccc; border-radius: 8px; padding: 1rem; margin-bottom: 1rem; }
+  label { display: block; margin: 0.5rem 0 0.2rem; font-weight: 600; }
+  input[type=number] { width: 6rem; padding: 0.3rem; }
+  button { padding: 0.5rem 1rem; margin-top: 0.5rem; cursor: pointer; }
+  #status { font-weight: 600; }
+  .ok { color: #0a7a2a; }
+  .err { color: #b00020; }
+  #log { font-family: monospace; font-size: 0.8rem; background: #f4f4f4; padding: 0.5rem; height: 200px; overflow-y: auto; white-space: pre-wrap; }
+</style>
+</head>
+<body>
+<h1>Haven Audio Control Service — bench test</h1>
+<p>Talks directly to the nRF5340 DK's custom GATT service over real Web Bluetooth. No app, no build step.</p>
+
+<section>
+  <div id="status">Not connected</div>
+  <button id="connectBtn">Connect to "Haven"</button>
+</section>
+
+<section>
+  <h2>Volume (0–100%)</h2>
+  <div>Current: <span id="volumeVal">—</span></div>
+  <input type="number" id="volumeInput" min="0" max="255" value="50">
+  <button id="volumeSetBtn" disabled>Set</button>
+</section>
+
+<section>
+  <h2>Frequency Range (200–8000 Hz)</h2>
+  <div>Current: <span id="freqVal">—</span></div>
+  <label>Lower Hz</label><input type="number" id="lowerInput" min="0" max="65535" value="200">
+  <label>Upper Hz</label><input type="number" id="upperInput" min="0" max="65535" value="8000">
+  <button id="freqSetBtn" disabled>Set</button>
+</section>
+
+<section>
+  <h2>Log</h2>
+  <div id="log"></div>
+</section>
+
+<script>
+const SERVICE_UUID       = '7a1e0001-4b5c-4e8a-9c1a-2f6b8d3c9a10';
+const VOLUME_CHAR_UUID   = '7a1e0002-4b5c-4e8a-9c1a-2f6b8d3c9a10';
+const FREQ_CHAR_UUID     = '7a1e0003-4b5c-4e8a-9c1a-2f6b8d3c9a10';
+
+const statusEl = document.getElementById('status');
+const logEl = document.getElementById('log');
+const volumeValEl = document.getElementById('volumeVal');
+const freqValEl = document.getElementById('freqVal');
+const volumeSetBtn = document.getElementById('volumeSetBtn');
+const freqSetBtn = document.getElementById('freqSetBtn');
+
+let volumeChar, freqChar;
+
+function log(msg, cls) {
+  const line = document.createElement('div');
+  if (cls) line.className = cls;
+  line.textContent = `[${new Date().toLocaleTimeString()}] ${msg}`;
+  logEl.appendChild(line);
+  logEl.scrollTop = logEl.scrollHeight;
+}
+
+function setStatus(text, cls) {
+  statusEl.textContent = text;
+  statusEl.className = cls || '';
+}
+
+function decodeFreqRange(dataView) {
+  const lower = dataView.getUint16(0, /*littleEndian=*/true);
+  const upper = dataView.getUint16(2, true);
+  return { lower, upper };
+}
+
+function encodeFreqRange(lower, upper) {
+  const buf = new ArrayBuffer(4);
+  const view = new DataView(buf);
+  view.setUint16(0, lower, true);
+  view.setUint16(2, upper, true);
+  return buf;
+}
+
+async function connect() {
+  try {
+    log('Requesting device (pick "Haven" in the browser dialog)...');
+    const device = await navigator.bluetooth.requestDevice({
+      // Filtering by name, not service UUID: the firmware's advertising
+      // packet only has room for the NUS UUID (128-bit UUIDs are 16 bytes
+      // each, and legacy advertising caps at 31 bytes total) -- our
+      // custom service UUID isn't broadcast, only discoverable after
+      // connecting. optionalServices is required by Web Bluetooth to
+      // permit GATT access to a non-standard service post-connection.
+      filters: [{ name: 'Haven' }],
+      optionalServices: [SERVICE_UUID],
+    });
+
+    device.addEventListener('gattserverdisconnected', () => {
+      setStatus('Disconnected', 'err');
+      volumeSetBtn.disabled = true;
+      freqSetBtn.disabled = true;
+      log('Device disconnected', 'err');
+    });
+
+    log(`Connecting to ${device.name || device.id}...`);
+    const server = await device.gatt.connect();
+    const service = await server.getPrimaryService(SERVICE_UUID);
+
+    volumeChar = await service.getCharacteristic(VOLUME_CHAR_UUID);
+    freqChar = await service.getCharacteristic(FREQ_CHAR_UUID);
+
+    const volumeVal = await volumeChar.readValue();
+    volumeValEl.textContent = `${volumeVal.getUint8(0)}%`;
+
+    const freqVal = await freqChar.readValue();
+    const { lower, upper } = decodeFreqRange(freqVal);
+    freqValEl.textContent = `[${lower}, ${upper}] Hz`;
+
+    await volumeChar.startNotifications();
+    volumeChar.addEventListener('characteristicvaluechanged', (e) => {
+      volumeValEl.textContent = `${e.target.value.getUint8(0)}%`;
+      log(`Notify: volume = ${e.target.value.getUint8(0)}%`);
+    });
+
+    await freqChar.startNotifications();
+    freqChar.addEventListener('characteristicvaluechanged', (e) => {
+      const { lower, upper } = decodeFreqRange(e.target.value);
+      freqValEl.textContent = `[${lower}, ${upper}] Hz`;
+      log(`Notify: freqRange = [${lower}, ${upper}] Hz`);
+    });
+
+    setStatus(`Connected: ${device.name || device.id}`, 'ok');
+    volumeSetBtn.disabled = false;
+    freqSetBtn.disabled = false;
+    log('Connected and subscribed to notifications.', 'ok');
+  } catch (err) {
+    setStatus('Connection failed', 'err');
+    log(`Error: ${err.message}`, 'err');
+  }
+}
+
+async function setVolume() {
+  const val = parseInt(document.getElementById('volumeInput').value, 10);
+
+  log(`Sending volume = ${val}...`);
+  try {
+    await volumeChar.writeValueWithResponse(new Uint8Array([val]));
+    log(`Wrote volume = ${val}`, 'ok');
+  } catch (err) {
+    // Out-of-range / bad-length writes come back as a GATT error from the
+    // firmware's BT_ATT_ERR_* rejection -- this is expected for val > 100.
+    log(`Write of ${val} rejected: ${err.message}`, 'err');
+  }
+}
+
+async function setFreqRange() {
+  const lower = parseInt(document.getElementById('lowerInput').value, 10);
+  const upper = parseInt(document.getElementById('upperInput').value, 10);
+
+  log(`Sending freqRange = [${lower}, ${upper}] Hz...`);
+  try {
+    await freqChar.writeValueWithResponse(encodeFreqRange(lower, upper));
+    log(`Wrote freqRange = [${lower}, ${upper}] Hz`, 'ok');
+  } catch (err) {
+    log(`Write of [${lower}, ${upper}] Hz rejected: ${err.message}`, 'err');
+  }
+}
+
+document.getElementById('connectBtn').addEventListener('click', connect);
+volumeSetBtn.addEventListener('click', setVolume);
+freqSetBtn.addEventListener('click', setFreqRange);
+
+// Chrome silently changes a focused <input type=number>'s value when the
+// mouse wheel scrolls over it -- blur on wheel so an incidental scroll
+// while reading the page can't quietly mutate what's about to be sent.
+document.querySelectorAll('input[type=number]').forEach((el) => {
+  el.addEventListener('wheel', () => el.blur(), { passive: true });
+});
+
+if (!navigator.bluetooth) {
+  setStatus('Web Bluetooth not available in this browser', 'err');
+  log('This browser does not support navigator.bluetooth. Use Chrome or Edge.', 'err');
+}
+</script>
+</body>
+</html>

@@ -47,4 +47,13 @@ void gatt_audio_service_set_callbacks(audio_volume_changed_cb_t on_volume,
 /* Registers the GATT service. Call once at boot. */
 int gatt_audio_service_init(void);
 
+/* Apply a value from a trusted, non-BLE source (currently: settings_store.c
+ * restoring from flash at boot) -- goes through the same notify/callback
+ * path as an accepted BLE write, but skips ATT-layer validation since the
+ * caller is expected to already be handing back a value this module itself
+ * previously accepted and saved.
+ */
+void gatt_audio_set_volume(uint8_t volume_pct);
+void gatt_audio_set_freq_range(const struct audio_freq_range *range);
+
 #endif /* HAVEN_GATT_AUDIO_SERVICE_H_ */

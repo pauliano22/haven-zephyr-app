@@ -12,6 +12,7 @@
 #include "gatt_audio_service.h"
 #include "mock_audio_pipeline.h"
 #include "protocol.h"
+#include "settings_store.h"
 
 LOG_MODULE_REGISTER(main, LOG_LEVEL_INF);
 
@@ -64,6 +65,13 @@ int main(void)
 	 */
 	gatt_audio_service_init();
 	mock_audio_pipeline_init();
+
+	/* After mock_audio_pipeline_init() so a restored value's callback
+	 * (registered by that call) actually fires -- otherwise the pipeline
+	 * would start from its own hardcoded defaults instead of whatever
+	 * was last saved.
+	 */
+	haven_settings_init();
 
 	LOG_INF("Ready — waiting for app connection");
 	return 0;
