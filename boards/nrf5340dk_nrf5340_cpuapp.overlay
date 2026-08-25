@@ -1,8 +1,7 @@
 /*
  * nRF5340 DK wiring for the ADAU1860 DSP — application core.
  *
- * Control port : I2C1 (Arduino-header pins on the DK; ADAU1860 at 0x28 with
- *                ADDR0/ADDR1 low)
+ * Control port : I2C1 (Arduino-header pins on the DK; ADAU1860 at 0x64)
  * Audio data   : I2S0 (multichannel PCM to/from the DSP)
  *
  * This enables the DK's own default pin mapping for each peripheral rather
@@ -15,15 +14,41 @@
  * numbering has occasionally shifted between SDK releases and board
  * revisions. i2c0 is the fallback if i2c1 turns out to be reserved for an
  * onboard peripheral on this revision.
+ *
+ * NOTE: 0x64 is the real ADAU1860 address per the actual Haven Dev Board
+ * schematic (EasyEDA Pro, "OpenEarable - Main v2.7", ADDR0/ADDR1 strapping
+ * — confirmed 2026-08-25, replacing the earlier 0x28 placeholder guessed
+ * before any schematic existed). Address is a property of the chip's
+ * strapping, not the board it's wired to, so this holds whether the real
+ * ADAU1860 ends up bench-wired to this DK or on the production board
+ * directly. The *bus* (i2c1 here) is still DK-specific, separate question
+ * from the address -- the schematic's own "I2C1" label refers to the
+ * production board's bus numbering, not necessarily this DK's &i2c1 node;
+ * still needs reconciling once real hardware is in hand.
+ *
+ * REFERENCE — real Haven Dev Board pin assignments, read directly off the
+ * MDBT531/MDBT53 (nRF5340) module symbol in the schematic (2026-08-25).
+ * Recorded here for whenever a real board-specific overlay gets built;
+ * NOT applied to the DK pins below, since the DK's Arduino header doesn't
+ * expose several of these GPIOs at all (confirmed against its own
+ * gpio-map -- e.g. P0.28 isn't broken out on this DK's header):
+ *   I2C1 (dedicated ADAU1860 bus, separate from the main SDA/SCL used by
+ *         the charger/fuel gauge): SDA1 = P1.15, SCL1 = P1.00
+ *   I2S:  DIN (ADAU1860->nRF, i.e. SDIN) = P0.28
+ *         BCLK                          = P1.10
+ *         LRCLK                         = P0.30
+ *         DOUT (nRF->ADAU1860, i.e. SDOUT) = P0.31
+ *   No MCK net visible between the module and the ADAU1860 -- see the I2S
+ *   pinctrl comment below for why.
  */
 
 &i2c1 {
 	status = "okay";
 	clock-frequency = <I2C_BITRATE_FAST>;
 
-	adau1860: adau1860@28 {
+	adau1860: adau1860@64 {
 		compatible = "adi,adau1860";
-		reg = <0x28>;
+		reg = <0x64>;
 		status = "okay";
 	};
 };
@@ -35,29 +60,36 @@
  * Arduino D4-D8 (gpio1 6-10), which are otherwise unused by the DK's
  * leds/buttons/i2c1/uart0/uart1/qspi/spi4.
  *
- * NOTE: assumes nRF5340 as I2S *master* (drives SCK/LRCK/MCK to the
- * ADAU1860) — confirm against the ADAU1860 datasheet's clocking role
- * once the audio driver init is written; if it's the other way round,
- * swap to the _S (slave) pin functions instead.
+ * NOTE: was assuming nRF5340 as I2S *master* -- switched to *slave*
+ * (2026-08-25) based on real schematic evidence, not just a guess either
+ * way: the ADAU1860 has its own dedicated 24.576MHz crystal directly on
+ * its XTALI/XTALO pins, a classic audio master-clock frequency, strongly
+ * suggesting *it* generates BCLK/LRCLK and the nRF5340 receives them --
+ * standard architecture for a system where a dedicated audio DSP anchors
+ * the clock domain. No MCK net is visible between the module and the
+ * ADAU1860 in the schematic either, consistent with slave mode (MCK is
+ * only meaningful as a master-mode output). Confirm against the ADAU1860
+ * datasheet before this matters for real -- nothing exercises actual I2S
+ * hardware yet either way (adau1860_control.c's audio path is still
+ * unwired), so this is a documentation correction, not yet a functional
+ * one.
  */
 &pinctrl {
 	i2s0_default: i2s0_default {
 		group1 {
-			psels = <NRF_PSEL(I2S_SCK_M, 1, 6)>,
-				<NRF_PSEL(I2S_LRCK_M, 1, 7)>,
+			psels = <NRF_PSEL(I2S_SCK_S, 1, 6)>,
+				<NRF_PSEL(I2S_LRCK_S, 1, 7)>,
 				<NRF_PSEL(I2S_SDOUT, 1, 8)>,
-				<NRF_PSEL(I2S_SDIN, 1, 9)>,
-				<NRF_PSEL(I2S_MCK, 1, 10)>;
+				<NRF_PSEL(I2S_SDIN, 1, 9)>;
 		};
 	};
 
 	i2s0_sleep: i2s0_sleep {
 		group1 {
-			psels = <NRF_PSEL(I2S_SCK_M, 1, 6)>,
-				<NRF_PSEL(I2S_LRCK_M, 1, 7)>,
+			psels = <NRF_PSEL(I2S_SCK_S, 1, 6)>,
+				<NRF_PSEL(I2S_LRCK_S, 1, 7)>,
 				<NRF_PSEL(I2S_SDOUT, 1, 8)>,
-				<NRF_PSEL(I2S_SDIN, 1, 9)>,
-				<NRF_PSEL(I2S_MCK, 1, 10)>;
+				<NRF_PSEL(I2S_SDIN, 1, 9)>;
 			low-power-enable;
 		};
 	};
