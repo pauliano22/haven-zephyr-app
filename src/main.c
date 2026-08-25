@@ -10,6 +10,7 @@
 #include "adau1860_control.h"
 #include "ble_transport.h"
 #include "gatt_audio_service.h"
+#include "mock_audio_pipeline.h"
 #include "protocol.h"
 
 LOG_MODULE_REGISTER(main, LOG_LEVEL_INF);
@@ -62,6 +63,7 @@ int main(void)
 	 * confirms it and logs the bench-default parameter values.
 	 */
 	gatt_audio_service_init();
+	mock_audio_pipeline_init();
 
 	LOG_INF("Ready — waiting for app connection");
 	return 0;

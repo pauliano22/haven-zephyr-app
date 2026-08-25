@@ -10,4 +10,5 @@ target_sources(app PRIVATE
   src/protocol.c
   src/adau1860_control.c
   src/gatt_audio_service.c
+  src/mock_audio_pipeline.c
 )
