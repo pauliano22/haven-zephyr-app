@@ -49,10 +49,16 @@ jobs:
 
       - name: Build (nRF5340 DK, application core + net-core ipc_radio via sysbuild)
         run: |
+          # --pristine bare (no value) is only valid on west versions where
+          # it's an optional-argument flag; this container's west requires
+          # an explicit choice, and without one silently swallowed the
+          # source_dir positional as its value instead (build 32872241192,
+          # "invalid choice: 'haven_zephyr_app'"). Spelling out `always`
+          # works on both.
           west build \
             --board nrf5340dk/nrf5340/cpuapp \
             --sysbuild \
-            --pristine \
+            --pristine always \
             haven_zephyr_app
 
       # No merged.hex: that's an MCUboot-merged-image convention and this
