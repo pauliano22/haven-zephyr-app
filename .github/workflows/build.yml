@@ -37,14 +37,21 @@ jobs:
 
       - name: Initialize west workspace
         run: |
-          # Container jobs inherit the runner's git credential config (set
-          # up for the checkout step above), which then intercepts *every*
-          # github.com fetch, including west's anonymous clone of the
-          # public nrfconnect/nrf repo -- without a TTY to prompt, that
-          # fails with "could not read Username for 'https://github.com'"
-          # (build 32865090917). Routing all github.com fetches through
-          # the job's own token fixes it instead of fighting that config.
-          git config --global url."https://x-access-token:${{ github.token }}@github.com/".insteadOf "https://github.com/"
+          # actions/checkout injects a global git credential header scoped
+          # broadly to https://github.com/ (for its own fetch of *this*
+          # repo), and inside a container: job that header leaks into every
+          # other github.com fetch too -- including west's anonymous clone
+          # of the public nrfconnect/nrf repo. With no TTY to satisfy a
+          # resulting auth prompt that failed as "could not read Username"
+          # (build 32865090917). Routing it through GITHUB_TOKEN instead
+          # made it worse ("Repository not found", build 32868435790) --
+          # that token is scoped only to *this* repo, so authenticating
+          # with it against a different repo reads as "can't see it," which
+          # is stricter than the plain anonymous access nrfconnect/nrf (a
+          # public repo) actually allows. Removing the header entirely is
+          # the fix: it restores normal anonymous fetching for repos this
+          # job was never meant to authenticate against.
+          git config --global --unset-all "http.https://github.com/.extraheader" || true
           west init -l haven_zephyr_app
           west update --narrow -o=--depth=1
           west zephyr-export
