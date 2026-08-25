@@ -9,6 +9,7 @@
 
 #include "adau1860_control.h"
 #include "ble_transport.h"
+#include "gatt_audio_service.h"
 #include "protocol.h"
 
 LOG_MODULE_REGISTER(main, LOG_LEVEL_INF);
@@ -55,6 +56,12 @@ int main(void)
 		LOG_ERR("BLE init failed (err %d)", err);
 		return err;
 	}
+
+	/* BT_GATT_SERVICE_DEFINE registers the service automatically inside
+	 * bt_enable() (called from ble_transport_init() above); this just
+	 * confirms it and logs the bench-default parameter values.
+	 */
+	gatt_audio_service_init();
 
 	LOG_INF("Ready — waiting for app connection");
 	return 0;

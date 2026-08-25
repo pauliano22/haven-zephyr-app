@@ -9,4 +9,5 @@ target_sources(app PRIVATE
   src/ble_transport.c
   src/protocol.c
   src/adau1860_control.c
+  src/gatt_audio_service.c
 )
