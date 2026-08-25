@@ -7,13 +7,14 @@
 # compile of every translation unit *is* the type check. A green run means
 # both "compiles" and "types are consistent" in one step.
 #
-# NOTE: this workflow was authored without access to a real NCS toolchain to
-# verify against. The `nordicplayground/nrfconnect-sdk` container image below
-# is the commonly-documented one for NCS app CI as of writing, but image
-# names/tags do drift — if this fails on first run, check
-# https://developer.nordicsemi.com/nRF_Connect_SDK/doc/latest/nrf/dm_config_and_build.html
-# or the image's own registry page for the current tag before assuming the
-# firmware code itself is at fault.
+# NOTE: originally used nordicplayground/nrfconnect-sdk:main, which is why
+# CI was failing (build 32862318520/32864473134, "manifest unknown") --
+# that image/repo was archived by Nordic in Dec 2024, its own README now
+# points here instead: https://github.com/NordicPlayground/nrf-docker
+# ghcr.io/zephyrproject-rtos/ci:v0.29.3 bundles Zephyr SDK 1.0.1, which
+# matches the SDK version verified locally against this repo's pinned NCS
+# v3.4.0 (west.yml) / Zephyr 4.4.0 -- see zephyrproject-rtos/docker-image's
+# own release notes before bumping this tag, to keep that match.
 name: Build
 
 on:
@@ -26,7 +27,7 @@ jobs:
   build:
     runs-on: ubuntu-latest
     container:
-      image: nordicplayground/nrfconnect-sdk:main
+      image: ghcr.io/zephyrproject-rtos/ci:v0.29.3
 
     steps:
       - name: Checkout haven_zephyr_app
@@ -40,7 +41,7 @@ jobs:
           west update --narrow -o=--depth=1
           west zephyr-export
 
-      - name: Build (nRF5340 DK, application core + net-core hci_rpmsg via sysbuild)
+      - name: Build (nRF5340 DK, application core + net-core ipc_radio via sysbuild)
         run: |
           west build \
             --board nrf5340dk/nrf5340/cpuapp \
@@ -48,12 +49,17 @@ jobs:
             --pristine \
             haven_zephyr_app
 
+      # No merged.hex: that's an MCUboot-merged-image convention and this
+      # build has no bootloader (see sysbuild.conf) -- sysbuild instead
+      # produces two independent per-core images, flashed separately
+      # (`west flash --runner jlink`, verified locally).
       - name: Upload build artifacts
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: haven-firmware-nrf5340dk
           path: |
-            build/merged.hex
+            build/haven_zephyr_app/zephyr/zephyr.hex
             build/haven_zephyr_app/zephyr/zephyr.elf
+            build/ipc_radio/zephyr/zephyr.hex
           if-no-files-found: warn
