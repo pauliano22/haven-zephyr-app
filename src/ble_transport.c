@@ -101,6 +101,24 @@ static void connected(struct bt_conn *conn, uint8_t err)
 	}
 }
 
+/* CONFIG_BT_MAX_CONN=1: calling bt_le_adv_start() synchronously from
+ * disconnected() below races the just-freed connection object's release
+ * back to the (single-slot) pool -- the stack hasn't necessarily finished
+ * that by the time this callback runs, so allocating a new one for
+ * advertising can fail with -ENOMEM even though a disconnect JUST
+ * happened. Deferring one system-workqueue hop gives that release time to
+ * land first. Confirmed live: without this, "Advertising failed to start
+ * (err -12)" on every single disconnect -- the board never became
+ * discoverable again until manually reset.
+ */
+static void readvertise_work_handler(struct k_work *work)
+{
+	ARG_UNUSED(work);
+	start_advertising();
+}
+
+static K_WORK_DEFINE(readvertise_work, readvertise_work_handler);
+
 static void disconnected(struct bt_conn *conn, uint8_t reason)
 {
 	LOG_INF("Phone disconnected (reason %u)", reason);
@@ -111,8 +129,8 @@ static void disconnected(struct bt_conn *conn, uint8_t reason)
 	if (disconnected_handler) {
 		disconnected_handler();
 	}
-	/* The app auto-reconnects; be discoverable again immediately. */
-	start_advertising();
+	/* The app auto-reconnects; be discoverable again as soon as possible. */
+	k_work_submit(&readvertise_work);
 }
 
 BT_CONN_CB_DEFINE(conn_callbacks) = {
