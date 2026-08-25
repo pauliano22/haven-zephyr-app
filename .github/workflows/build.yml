@@ -37,6 +37,14 @@ jobs:
 
       - name: Initialize west workspace
         run: |
+          # Container jobs inherit the runner's git credential config (set
+          # up for the checkout step above), which then intercepts *every*
+          # github.com fetch, including west's anonymous clone of the
+          # public nrfconnect/nrf repo -- without a TTY to prompt, that
+          # fails with "could not read Username for 'https://github.com'"
+          # (build 32865090917). Routing all github.com fetches through
+          # the job's own token fixes it instead of fighting that config.
+          git config --global url."https://x-access-token:${{ github.token }}@github.com/".insteadOf "https://github.com/"
           west init -l haven_zephyr_app
           west update --narrow -o=--depth=1
           west zephyr-export
