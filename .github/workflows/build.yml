@@ -30,28 +30,28 @@ jobs:
       image: ghcr.io/zephyrproject-rtos/ci:v0.29.3
 
     steps:
+      # persist-credentials: false is the actual fix for the two attempts
+      # below it in git history -- actions/checkout@v4 injects its fetch
+      # token via GIT_CONFIG_COUNT/GIT_CONFIG_KEY_n/GIT_CONFIG_VALUE_n
+      # *environment variables*, not a gitconfig file, so `git config
+      # --unset` (build 32869642761) can't touch it -- it persists across
+      # every step in the job regardless, intercepting west's later
+      # anonymous clone of the public nrfconnect/nrf repo with no TTY to
+      # satisfy the resulting auth prompt ("could not read Username",
+      # builds 32865090917 and 32869642761). Routing it through
+      # GITHUB_TOKEN instead made it worse ("Repository not found", build
+      # 32868435790) -- that token is scoped only to *this* repo. Telling
+      # checkout not to persist credentials at all sidesteps every variant
+      # of this at the source; nothing later in the job needs to
+      # authenticate back to this repo.
       - name: Checkout haven_zephyr_app
         uses: actions/checkout@v4
         with:
           path: haven_zephyr_app
+          persist-credentials: false
 
       - name: Initialize west workspace
         run: |
-          # actions/checkout injects a global git credential header scoped
-          # broadly to https://github.com/ (for its own fetch of *this*
-          # repo), and inside a container: job that header leaks into every
-          # other github.com fetch too -- including west's anonymous clone
-          # of the public nrfconnect/nrf repo. With no TTY to satisfy a
-          # resulting auth prompt that failed as "could not read Username"
-          # (build 32865090917). Routing it through GITHUB_TOKEN instead
-          # made it worse ("Repository not found", build 32868435790) --
-          # that token is scoped only to *this* repo, so authenticating
-          # with it against a different repo reads as "can't see it," which
-          # is stricter than the plain anonymous access nrfconnect/nrf (a
-          # public repo) actually allows. Removing the header entirely is
-          # the fix: it restores normal anonymous fetching for repos this
-          # job was never meant to authenticate against.
-          git config --global --unset-all "http.https://github.com/.extraheader" || true
           west init -l haven_zephyr_app
           west update --narrow -o=--depth=1
           west zephyr-export
