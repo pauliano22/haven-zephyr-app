@@ -5,10 +5,10 @@ that's most likely to be the "troublesome" one for a hearing-protection use
 case, and encode it into the exact byte format Haven's firmware expects on
 its FreqRange BLE characteristic.
 
-This is a bench/analysis tool, not firmware -- it doesn't talk to the board
-itself. It produces the same 4 bytes a real BLE write to that characteristic
-would carry; wiring it up to actually perform that write (from the mobile
-app, or a bench script) is future integration work, not done here.
+This is a bench/analysis tool, not firmware -- it doesn't run on the board
+itself. `analyze.py` + `ble_translator.py` produce the same 4 bytes a real
+BLE write to that characteristic would carry; `apply_over_ble.py` (below)
+performs that write directly against a connected board.
 
 ## What it does and why
 
@@ -70,11 +70,27 @@ wire_bytes = encode_freq_range(lower_hz, upper_hz)  # ready to write to the char
   range before packing, so this tool can never hand the firmware something
   it would have to reject.
 
-To actually apply a detected band, write `wire_bytes` to the FreqRange
-characteristic the same way `haven-app`'s bench controls or
-`tools/ble_bench_test.html` already do (see `../docs/ble-protocol.md` in
-the mobile app repo for the existing GATT write pattern) -- that
-integration isn't implemented here.
+## Applying a detected band over BLE
+
+`apply_over_ble.py` closes the loop: analyze a recording, then write the
+result straight to a connected board's FreqRange characteristic, using the
+same UUIDs and write semantics as `tools/ble_bench_test.html`'s
+`freqChar.writeValueWithResponse(...)` (a second, independent client
+speaking the same protocol, not a new one).
+
+```bash
+pip install -r requirements.txt   # now includes bleak
+python3 apply_over_ble.py recording.wav                # scan, connect, write
+python3 apply_over_ble.py recording.wav --device Haven  # match by name (default)
+python3 apply_over_ble.py recording.wav --dry-run        # analyze + print only, no BLE
+```
+
+Needs a working Bluetooth adapter and `bleak` for anything but `--dry-run`.
+Neither was available in the environment this was written in -- the
+analysis + encoding + argument handling are unit-tested, and the BLE write
+path is implemented against `bleak`'s documented API, but the actual radio
+write has not been exercised against a real board. Verify that leg for real
+before relying on it unattended.
 
 ## Tests
 
