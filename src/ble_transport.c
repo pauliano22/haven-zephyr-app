@@ -33,6 +33,29 @@ static const struct bt_data sd[] = {
 	BT_DATA_BYTES(BT_DATA_UUID128_ALL, BT_UUID_NUS_VAL),
 };
 
+/* ── Power management: adaptive advertising interval ─────────────────────────
+ * Fast (BT_LE_ADV_CONN_FAST_1, ~30-60ms) is easy to find and reconnect to but
+ * keeps the radio on often. If nothing connects within BLE_IDLE_ADV_TIMEOUT_MS
+ * of going idle, drop to a much slower interval to save power -- still fully
+ * connectable, just polled less often. A button press (or any other trigger)
+ * can force an immediate return to fast via ble_transport_wake_fast_advertising().
+ *
+ * 5 minutes is the real value; shortened temporarily during hardware bring-up
+ * verification, then restored -- see git history if this ever needs re-tuning.
+ */
+#define BLE_IDLE_ADV_TIMEOUT_MS (5 * 60 * 1000)
+
+static const struct bt_le_adv_param slow_adv_param = BT_LE_ADV_PARAM_INIT(
+	BT_LE_ADV_OPT_CONN,
+	BT_GAP_ADV_SLOW_INT_MIN,
+	BT_GAP_ADV_SLOW_INT_MAX,
+	NULL);
+
+static bool advertising_fast = true;
+
+static void idle_timeout_work_handler(struct k_work *work);
+static K_WORK_DELAYABLE_DEFINE(idle_timeout_work, idle_timeout_work_handler);
+
 /* ── Line assembly ──────────────────────────────────────────────────────────
  * NUS writes can arrive fragmented; accumulate until '\n'. On overflow the
  * rest of the line is dropped and the (truncated) buffer will simply fail
@@ -74,16 +97,31 @@ static struct bt_nus_cb nus_callbacks = {
 
 /* ── Connection lifecycle ──────────────────────────────────────────────────*/
 
-static void start_advertising(void)
+static void start_advertising(const struct bt_le_adv_param *param, bool fast)
 {
-	int err = bt_le_adv_start(BT_LE_ADV_CONN_FAST_1, ad, ARRAY_SIZE(ad), sd,
-				  ARRAY_SIZE(sd));
+	int err = bt_le_adv_start(param, ad, ARRAY_SIZE(ad), sd, ARRAY_SIZE(sd));
 
 	if (err) {
 		LOG_ERR("Advertising failed to start (err %d)", err);
-	} else {
-		LOG_INF("Advertising as \"%s\"", CONFIG_BT_DEVICE_NAME);
+		return;
 	}
+	advertising_fast = fast;
+	LOG_INF("Advertising as \"%s\" (%s)", CONFIG_BT_DEVICE_NAME,
+		fast ? "fast" : "slow");
+}
+
+static void idle_timeout_work_handler(struct k_work *work)
+{
+	ARG_UNUSED(work);
+	/* A connection may have landed right as the timer fired; nothing to
+	 * slow down in that case.
+	 */
+	if (current_conn) {
+		return;
+	}
+	LOG_INF("Idle timeout -- dropping to slow advertising");
+	bt_le_adv_stop();
+	start_advertising(&slow_adv_param, false);
 }
 
 static void connected(struct bt_conn *conn, uint8_t err)
@@ -95,6 +133,7 @@ static void connected(struct bt_conn *conn, uint8_t err)
 	current_conn = bt_conn_ref(conn);
 	line_len = 0;
 	line_overflow = false;
+	k_work_cancel_delayable(&idle_timeout_work);
 	LOG_INF("Phone connected");
 	if (connected_handler) {
 		connected_handler();
@@ -114,7 +153,8 @@ static void connected(struct bt_conn *conn, uint8_t err)
 static void readvertise_work_handler(struct k_work *work)
 {
 	ARG_UNUSED(work);
-	start_advertising();
+	start_advertising(BT_LE_ADV_CONN_FAST_1, true);
+	k_work_schedule(&idle_timeout_work, K_MSEC(BLE_IDLE_ADV_TIMEOUT_MS));
 }
 
 static K_WORK_DEFINE(readvertise_work, readvertise_work_handler);
@@ -129,7 +169,9 @@ static void disconnected(struct bt_conn *conn, uint8_t reason)
 	if (disconnected_handler) {
 		disconnected_handler();
 	}
-	/* The app auto-reconnects; be discoverable again as soon as possible. */
+	/* The app auto-reconnects; be discoverable again as soon as possible.
+	 * readvertise_work_handler() also (re)arms the idle timeout above.
+	 */
 	k_work_submit(&readvertise_work);
 }
 
@@ -165,7 +207,8 @@ int ble_transport_init(ble_line_cb_t line_cb)
 		return err;
 	}
 
-	start_advertising();
+	start_advertising(BT_LE_ADV_CONN_FAST_1, true);
+	k_work_schedule(&idle_timeout_work, K_MSEC(BLE_IDLE_ADV_TIMEOUT_MS));
 	return 0;
 }
 
@@ -175,4 +218,15 @@ int ble_transport_send(const char *data, size_t len)
 		return -ENOTCONN;
 	}
 	return bt_nus_send(current_conn, (const uint8_t *)data, (uint16_t)len);
+}
+
+void ble_transport_wake_fast_advertising(void)
+{
+	if (current_conn || advertising_fast) {
+		return;
+	}
+	LOG_INF("Forcing fast advertising");
+	bt_le_adv_stop();
+	start_advertising(BT_LE_ADV_CONN_FAST_1, true);
+	k_work_reschedule(&idle_timeout_work, K_MSEC(BLE_IDLE_ADV_TIMEOUT_MS));
 }

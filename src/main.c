@@ -14,6 +14,7 @@
 #include "protocol.h"
 #include "settings_store.h"
 #include "tone_safety.h"
+#include "wake_button.h"
 
 LOG_MODULE_REGISTER(main, LOG_LEVEL_INF);
 
@@ -94,6 +95,11 @@ int main(void)
 	 * was last saved.
 	 */
 	haven_settings_init();
+
+	err = wake_button_init();
+	if (err) {
+		LOG_WRN("Wake button init failed (err %d) -- continuing without it", err);
+	}
 
 	LOG_INF("Ready — waiting for app connection");
 	return 0;
