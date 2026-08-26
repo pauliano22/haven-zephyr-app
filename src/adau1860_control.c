@@ -1,6 +1,7 @@
 #include "adau1860_control.h"
 
 #include <math.h>
+#include <string.h>
 
 /* picolibc's math.h only exposes M_PI under a feature-test macro that
  * -std=c17 doesn't define. */
@@ -24,16 +25,52 @@ LOG_MODULE_REGISTER(adau1860_control, LOG_LEVEL_INF);
  */
 static const struct i2c_dt_spec adau1860_i2c = I2C_DT_SPEC_GET(DT_NODELABEL(adau1860));
 
-/* TODO(hw-bringup): implement the safeload handshake for glitch-free
- * coefficient swaps once the register map is known. This currently performs
- * a real I2C write of whatever bytes are handed to it, with no framing.
+/* ── Generic SigmaDSP register I/O ────────────────────────────────────────
+ * The ADAU1860 is part of ADI's SigmaDSP family; its own datasheet doesn't
+ * publish a general register map (confirmed against the datasheet, the
+ * product FAQ, and EngineerZone community reports -- Analog Devices expects
+ * register-level programming to come from a SigmaStudio+-exported firmware
+ * blob, not hand-picked addresses). What *is* standardized across the whole
+ * SigmaDSP family, and confirmed against both the Linux kernel's generic
+ * `sigmadsp` codec driver and a real, widely-used Arduino reference
+ * implementation (MCUdude/SigmaDSP): 16-bit register addresses, sent
+ * big-endian (MSByte first) immediately before the data payload, on both
+ * plain register writes and multi-byte "safeload" writes. This layer
+ * implements exactly that framing and nothing chip-specific -- callers still
+ * need real addresses, which come from the SigmaStudio+ export once it
+ * exists (see adau1860_control_init()'s TODO below).
  */
-static int adau1860_i2c_write(const uint8_t *data, size_t len)
+static int adau1860_i2c_write_reg(uint16_t addr, const uint8_t *data, size_t len)
 {
-	int err = i2c_write_dt(&adau1860_i2c, data, len);
+	uint8_t frame[2 + 32];
+	int err;
+
+	if (len > sizeof(frame) - 2) {
+		LOG_ERR("Register write too long: %u bytes (max %u)",
+			(unsigned int)len, (unsigned int)(sizeof(frame) - 2));
+		return -EINVAL;
+	}
+
+	frame[0] = (uint8_t)(addr >> 8);
+	frame[1] = (uint8_t)(addr & 0xFF);
+	memcpy(&frame[2], data, len);
+
+	err = i2c_write_dt(&adau1860_i2c, frame, len + 2);
+	if (err) {
+		LOG_DBG("I2C write failed (err %d), reg 0x%04x, %u bytes", err, addr,
+			(unsigned int)len);
+	}
+	return err;
+}
+
+static int adau1860_i2c_read_reg(uint16_t addr, uint8_t *data, size_t len)
+{
+	uint8_t addr_buf[2] = { (uint8_t)(addr >> 8), (uint8_t)(addr & 0xFF) };
+	int err = i2c_write_read_dt(&adau1860_i2c, addr_buf, sizeof(addr_buf), data, len);
 
 	if (err) {
-		LOG_DBG("I2C write failed (err %d), %u bytes", err, (unsigned int)len);
+		LOG_DBG("I2C read failed (err %d), reg 0x%04x, %u bytes", err, addr,
+			(unsigned int)len);
 	}
 	return err;
 }
@@ -87,10 +124,20 @@ int adau1860_control_init(void)
 		return -ENODEV;
 	}
 
-	/* TODO(hw-bringup): read CHIP_ID register, verify, release HIBERNATE,
-	 * SPI-download or I2C-stream the SigmaStudio+ program image, start
-	 * the DSP core.
+	/* TODO(hw-bringup): once a SigmaStudio+ project for this board exists
+	 * and is exported, this is where its firmware blob gets loaded --
+	 * release HIBERNATE, stream the program over I2C (or SPI, depending
+	 * on how the export is configured), start the DSP core. There is no
+	 * public ADAU1860 register map to hand-write this against (checked:
+	 * the datasheet's own I2C section doesn't include one, consistent
+	 * with EngineerZone reports for this chip) -- adau1860_i2c_write_reg()
+	 * / _read_reg() above implement the generic SigmaDSP-family wire
+	 * framing (confirmed against the Linux kernel's `sigmadsp` codec
+	 * driver and a real Arduino SigmaDSP library), ready for whatever
+	 * real register addresses the export actually contains.
 	 */
+	ARG_UNUSED(adau1860_i2c_write_reg);
+	ARG_UNUSED(adau1860_i2c_read_reg);
 	LOG_INF("ADAU1860 control init: I2C1 bus ready, addr 0x%02x [no register "
 		"transactions yet]", adau1860_i2c.addr);
 	return 0;
@@ -114,8 +161,10 @@ int adau1860_control_apply_filters(const struct filter_band *bands, size_t count
 		/* TODO(hw-bringup): convert c to the DSP's coefficient format
 		 * and safeload into the parameter RAM slot for stage i, e.g.:
 		 *   uint8_t frame[PARAM_FRAME_LEN];
-		 *   encode_param_ram_write(PARAM_RAM_STAGE(i), &c, frame);
-		 *   adau1860_i2c_write(frame, sizeof(frame));
+		 *   encode_param_ram_write(&c, frame);
+		 *   adau1860_i2c_write_reg(PARAM_RAM_STAGE_ADDR(i), frame, sizeof(frame));
+		 * PARAM_RAM_STAGE_ADDR() doesn't exist yet -- it's a real address
+		 * from the SigmaStudio+ export, not something to guess at.
 		 */
 		ARG_UNUSED(c);
 	}
@@ -123,7 +172,6 @@ int adau1860_control_apply_filters(const struct filter_band *bands, size_t count
 	/* TODO(hw-bringup): zero the coefficients of the (MAX_BANDS - count)
 	 * unused cascade stages so stale filters don't linger.
 	 */
-	(void)adau1860_i2c_write;
 	return 0;
 }
 
