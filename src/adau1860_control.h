@@ -32,6 +32,16 @@ struct adau1860_biquad {
  */
 int adau1860_control_init(void);
 
+/* ── Generic SigmaDSP register I/O ────────────────────────────────────────
+ * 16-bit register address, big-endian, immediately before the data payload
+ * -- standard across the whole SigmaDSP family (see adau1860_control.c for
+ * the citations). Exposed here so adau1860_program_loader.c can dispatch a
+ * parsed firmware blob's write actions through the same bus binding without
+ * duplicating it.
+ */
+int adau1860_i2c_write_reg(uint16_t addr, const uint8_t *data, size_t len);
+int adau1860_i2c_read_reg(uint16_t addr, uint8_t *data, size_t len);
+
 /* Compute biquad coefficients for each band and push them into the DSP's
  * parameter RAM (safeload). Bands with atten_db < PROTOCOL_ATTEN_MAX_DB get a
  * peaking-cut EQ of that depth; at the max they collapse to a pure notch.

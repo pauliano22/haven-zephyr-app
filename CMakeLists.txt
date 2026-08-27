@@ -9,6 +9,7 @@ target_sources(app PRIVATE
   src/ble_transport.c
   src/protocol.c
   src/adau1860_control.c
+  src/adau1860_program_loader.c
   src/gatt_audio_service.c
   src/mock_audio_pipeline.c
   src/settings_store.c
