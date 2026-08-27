@@ -40,22 +40,30 @@ static const struct i2c_dt_spec adau1860_i2c = I2C_DT_SPEC_GET(DT_NODELABEL(adau
  * need real addresses, which come from the SigmaStudio+ export once it
  * exists (see adau1860_control_init()'s TODO below).
  */
-static int adau1860_i2c_write_reg(uint16_t addr, const uint8_t *data, size_t len)
+int adau1860_i2c_write_reg(uint16_t addr, const uint8_t *data, size_t len)
 {
-	uint8_t frame[2 + 32];
-	int err;
+	uint8_t addr_buf[2] = { (uint8_t)(addr >> 8), (uint8_t)(addr & 0xFF) };
+	/* Two messages, only the last carrying I2C_MSG_STOP, so the controller
+	 * keeps the bus held between them -- this is one contiguous I2C
+	 * transaction (address bytes then data, no repeated START in between),
+	 * not two separate ones. Avoids copying arbitrarily large payloads
+	 * (a whole program-memory WRITEXBYTES chunk, for the blob loader) into
+	 * a fixed-size stack buffer first.
+	 */
+	struct i2c_msg msgs[2] = {
+		{
+			.buf = addr_buf,
+			.len = sizeof(addr_buf),
+			.flags = I2C_MSG_WRITE,
+		},
+		{
+			.buf = (uint8_t *)data,
+			.len = len,
+			.flags = I2C_MSG_WRITE | I2C_MSG_STOP,
+		},
+	};
+	int err = i2c_transfer_dt(&adau1860_i2c, msgs, ARRAY_SIZE(msgs));
 
-	if (len > sizeof(frame) - 2) {
-		LOG_ERR("Register write too long: %u bytes (max %u)",
-			(unsigned int)len, (unsigned int)(sizeof(frame) - 2));
-		return -EINVAL;
-	}
-
-	frame[0] = (uint8_t)(addr >> 8);
-	frame[1] = (uint8_t)(addr & 0xFF);
-	memcpy(&frame[2], data, len);
-
-	err = i2c_write_dt(&adau1860_i2c, frame, len + 2);
 	if (err) {
 		LOG_DBG("I2C write failed (err %d), reg 0x%04x, %u bytes", err, addr,
 			(unsigned int)len);
@@ -63,7 +71,7 @@ static int adau1860_i2c_write_reg(uint16_t addr, const uint8_t *data, size_t len
 	return err;
 }
 
-static int adau1860_i2c_read_reg(uint16_t addr, uint8_t *data, size_t len)
+int adau1860_i2c_read_reg(uint16_t addr, uint8_t *data, size_t len)
 {
 	uint8_t addr_buf[2] = { (uint8_t)(addr >> 8), (uint8_t)(addr & 0xFF) };
 	int err = i2c_write_read_dt(&adau1860_i2c, addr_buf, sizeof(addr_buf), data, len);
@@ -136,8 +144,6 @@ int adau1860_control_init(void)
 	 * driver and a real Arduino SigmaDSP library), ready for whatever
 	 * real register addresses the export actually contains.
 	 */
-	ARG_UNUSED(adau1860_i2c_write_reg);
-	ARG_UNUSED(adau1860_i2c_read_reg);
 	LOG_INF("ADAU1860 control init: I2C1 bus ready, addr 0x%02x [no register "
 		"transactions yet]", adau1860_i2c.addr);
 	return 0;
