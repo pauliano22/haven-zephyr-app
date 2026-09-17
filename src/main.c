@@ -7,6 +7,7 @@
 #include <zephyr/kernel.h>
 #include <zephyr/logging/log.h>
 
+#include "ack.h"
 #include "adau1860_control.h"
 #include "ble_transport.h"
 #include "gatt_audio_service.h"
@@ -25,6 +26,7 @@ static void handle_line(const char *line)
 
 	if (err) {
 		LOG_WRN("Rejected payload: %s", line);
+		ack_send_error();
 		return;
 	}
 
@@ -49,6 +51,8 @@ static void handle_line(const char *line)
 	default:
 		break;
 	}
+
+	ack_send(cmd.type);
 }
 
 /* Losing the BLE link must silence any active tone immediately, the same

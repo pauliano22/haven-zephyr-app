@@ -6,6 +6,7 @@ project(haven_zephyr_app)
 
 target_sources(app PRIVATE
   src/main.c
+  src/ack.c
   src/ble_transport.c
   src/protocol.c
   src/adau1860_control.c
