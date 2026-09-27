@@ -196,20 +196,51 @@ though I haven't seen FastDSP's full instruction set or program RAM size
 session), so this should be a quick confirmation with ADI or in the full
 datasheet before being treated as fully certain.
 
-**Where it actually fits: the phone, not the device.** Neither the mic's
-real-time hear-through signal path nor the wearable's own compute is the
-right target. A phone CPU runs RNNoise trivially (its own reference
-numbers: 1.3% of one x86 core, and JS/WASM ports exist for exactly this).
-The right use is cleaning up **recordings**, not the live hear-through
-audio — e.g. denoising a clip before `ml/analyze.py`'s PSD-peak detection
-runs on it, or before the Tier 2 "continuous monitoring" idea processes a
-rolling window on the phone. That sidesteps both placement problems
-entirely: it's off the safety-critical, latency-critical real-time path, and
-it runs where compute is abundant. Worth prototyping there, not on-device.
+**A third placement was proposed here, then tested, then withdrawn.** The
+first version of this update suggested "the phone, not the device" — denoise
+a recording before `ml/analyze.py`'s PSD-peak detection runs on it, since a
+phone CPU runs RNNoise trivially and it's off the real-time path. That
+placement sidesteps the two problems above, but it turns out to have a
+third, more basic problem: **RNNoise is a *speech* denoiser, and
+`analyze.py`'s whole job is finding a narrowband, non-speech tone** (a
+machine whine, an alarm, feedback) — exactly the kind of stationary,
+non-speech content a speech-trained model is built to suppress, not
+preserve. Tested this directly rather than assuming it either way:
+`ml/experiments/rnnoise_feasibility_check.py` runs a loud pure 1 kHz tone
+(favorable SNR — the best case for it to survive), a crude speech-like
+harmonic+AM proxy, and a frequency-modulated "warbling alarm" proxy, each
+plus noise, through RNNoise. Real, reproducible result: **0.1%, 0.9%, and
+36.6% of the input energy survived, respectively** — RNNoise suppressed
+almost all of even the loud, high-SNR pure tone, and most of the alarm
+proxy too. (Also found and worked around a real bug in the installed
+`pyrnnoise==0.4.5` package along the way: its own `denoise_wav()`
+convenience method raises `AttributeError` — `Reader.rate` doesn't exist,
+the real attribute is `sample_rate` — so the experiment calls the
+lower-level, correctly-implemented `denoise_chunk()` directly instead.)
 
-This is also the more general lesson from this pass, worth keeping in mind
-for anything else considered later: "a similar chip ran this" is a start,
-not a placement decision — check what the *specific* target core's budget
-actually is (FastDSP's real per-sample instruction count here) and whether
-the workload's natural shape (per-frame recurrent net vs. per-sample fixed
-filter) matches it, before calling something feasible.
+**Caveat, stated plainly**: these are synthetic proxies, not real recorded
+speech or real recorded alarms — RNNoise's actual trained model responds to
+real speech statistics these signals only loosely approximate, so this is a
+real, reproducible red flag from direct testing, not a mathematical proof
+it can never apply here. But it's enough to withdraw the "denoise before
+`analyze.py`" recommendation until tested against real recordings, and it
+means RNNoise's plausible use for Haven, if any, narrows to something
+speech-shaped specifically — own-voice pickup or conversational
+hear-through enhancement — not general environmental-tone or alarm cleanup.
+Nothing here recommends building that; it's a narrower, unconfirmed
+possibility, not a next step.
+
+**RNNoise is currently Tier 3 for this project as a result** — not because
+it doesn't work (it clearly does, at suppressing non-speech content), but
+because every placement checked either reopens a settled architecture
+decision (nRF5340), doesn't have the right kind of compute (ADAU1860
+FastDSP), or actively works against the specific problem Haven needs solved
+(suppressing the tones the project is trying to find, not remove).
+
+**The more general lesson from this whole pass**: "a similar chip ran this"
+or "this library exists" is a start, not a placement decision or a fitness
+decision. Two different checks caught two different real problems here —
+whether the *target hardware's* specific budget matches the workload's
+shape (FastDSP), and whether the *tool's actual trained behavior* matches
+what the task needs (RNNoise) — and neither was visible without pulling
+real numbers and running a real, reproducible test.
