@@ -83,14 +83,19 @@ have silently drifted out of sync with `dueForStep` otherwise.
 
 ## Tier 2 — buildable, needs more dev work, modest data
 
-**Continuous (not offline-batch) version of the existing PSD tool.** The
-`ml/analyze.py` heuristic that already exists (Welch PSD, dominant-peak
-half-power bandwidth) currently runs on a single recorded .wav file. Running
-the same math over a rolling window of live mic audio — on the phone, or
-on-device — turns "what was the troublesome frequency in this recording"
-into "what's the troublesome frequency right now." This is still fixed DSP,
-not a learned model, and it's the honest, buildable version of "figure out
-what in the environment is bothering me."
+**Continuous (not offline-batch) version of the existing PSD tool — built
+2026-09-27.** `ml/rolling_analyze.py` slides a window across a longer
+recording, running the same `find_troublesome_band` heuristic on each one,
+and `find_sustained_bands()` separates a genuinely sustained tone (held
+roughly steady for a couple of seconds or more) from a brief transient (a
+door slam, a single loud moment) that a single window might flag but that
+isn't worth alerting on. 10 new tests, including one that demonstrates the
+actual point directly: a recording where the dominant tone changes from
+1 kHz to 4 kHz partway through is correctly tracked as two different
+periods, not averaged into one answer the way a single `analyze_file()`
+call on the whole clip would. Still fixed DSP, not a learned model — see
+`ml/README.md`. Operates on a batch of samples (a recording) here; wiring
+it to a live feed is future integration work, not done here.
 
 **On-device sound-event classification.** Nordic officially supports Edge
 Impulse's tinyML workflow on the nRF5340 — train a small sound classifier
