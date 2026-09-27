@@ -99,3 +99,64 @@ with something that's honestly describable as personalization. Tier 2's
 on-device classifier is a real second step once there's a reason to collect
 the training recordings. Tier 3 stays off the roadmap and out of any
 marketing copy.
+
+## Update 2026-09-27: built, and two more real options found
+
+**The Tier 1 bandit tuner is built** — `haven-app` PR #10, "Add a
+preference-guided tuner for softening depth and width." Two phases (depth,
+then width), same algorithm class described above, 15 new tests including
+one that caught a real off-by-one convergence bug before it shipped (an
+earlier version of the search could stop one comparison short and silently
+lock in the wrong candidate at the edge of the range).
+
+**A "frontier AI model" feature, prototyped**: `haven-app` PR #11 — a
+deterministic trend-insights layer over the existing LDL/match history
+(real stats, no AI at all, useful on its own), plus a tested-but-not-live
+LLM rewrite step that turns those facts into a plain-language paragraph.
+The actual safety property that makes this honestly buildable in a
+health-adjacent app: every number the model outputs is checked against the
+real source data, and any fabricated number (an invented percentage, an
+untested frequency) discards the response and falls back to the
+deterministic text. **Not wired to a live API key anywhere** — a client app
+must never embed a provider key in its bundle, so this needs a small
+backend first (holds the key, the app calls that instead), which is a real,
+separate cost/ops decision, not something to add unilaterally. Full
+writeup: `haven-app/docs/llm-summary.md`.
+
+**Two more real Tier 2 options found, both with concrete precedent:**
+
+- **YAMNet for on-device/phone sound-event classification** — a real,
+  publicly available pretrained model (521 sound classes, trained on
+  AudioSet) with an existing TFLite conversion and React Native bindings
+  ([TensorFlow's own writeup](https://blog.tensorflow.org/2021/09/easy-machine-learning-for-on-device-audio.html);
+  [YAMNet→TFLite conversion](https://medium.com/@antonyharfield/converting-the-yamnet-audio-detection-model-for-tensorflow-lite-inference-43d049bd357c)).
+  The real advantage over the Tier 2 idea in this doc's first version:
+  **no custom training data needed at all** — it's pretrained on a broad
+  general-sound corpus, so tagging ambient context (traffic, alarm, speech,
+  machinery, quiet) could start immediately instead of waiting on a
+  recordings-collection step. The real cost: React Native's TFLite tooling
+  needs a custom dev client, not Expo Go or the web build — same
+  constraint already blocking `react-native-ble-plx` bring-up, so this
+  would ride along with that work rather than needing its own new
+  infrastructure. Not prototyped yet — worth doing once a dev-client build
+  exists for other reasons anyway.
+- **RNNoise for mic noise suppression** — a real, widely-shipped open-source
+  library (used in Mumble, OBS) that pairs classic DSP with a small
+  recurrent network to suppress background/wind noise in real time
+  ([project background](https://hobo.house/2024/03/01/easy-noise-suppression-with-rnnoise/)).
+  The genuinely relevant finding: **it's been ported and run in real time on
+  an STM32 microcontroller**
+  ([Real-Time RNN Speech Noise Suppression on a MCU](https://medium.com/analytics-vidhya/real-time-rnn-speech-noise-suppression-on-a-microcontroller-stm32-e17d8c3eac57)),
+  a similar embedded class to the nRF5340's Cortex-M33, with follow-up work
+  on mixed FP16/INT8 quantization specifically for multi-core MCU speech
+  enhancement ([arXiv:2210.07692](https://arxiv.org/pdf/2210.07692)). This
+  is a plausible on-device candidate for cleaning up the PDM mic signal
+  (wind/handling noise) before it reaches the hear-through path — distinct
+  from anything in Tier 1/2 above, and worth a real feasibility pass
+  (memory/cycle budget on the nRF5340 specifically) before committing to it,
+  not assumed to fit just because an STM32 port exists.
+
+Neither of these is built. Both are real, cited, and buildable without
+inventing a dataset from scratch — a materially better starting position
+than this doc's original Tier 2 sketch (which assumed custom-recorded
+training data would be needed either way).
