@@ -71,6 +71,7 @@ def rolling_analyze(
 
 def find_sustained_bands(
     windows: List[WindowResult],
+    window_s: float,
     freq_tolerance_hz: float = 200.0,
     min_duration_s: float = 2.0,
 ) -> List[SustainedBand]:
@@ -81,6 +82,23 @@ def find_sustained_bands(
     window might flag but that isn't worth alerting on.
 
     `windows` must be in time order (as rolling_analyze yields them).
+    `window_s` must be the same value passed to the rolling_analyze() call
+    that produced them -- a group's real audio coverage extends past its
+    last window's *start* time by a full window length (each WindowResult
+    marks where its window began, not where it ended), so duration is
+    (last start - first start) + window_s, not just the gap between starts.
+    Passing the wrong window_s under- or over-reports duration without
+    raising -- there's no way to detect that from WindowResult alone, so
+    this is a real caller contract, not just documentation.
+
+    A previous version approximated this without window_s at all (using
+    the gap between starts alone, giving 0.0 for a single-window group and
+    undercounting every multi-window group by one full window length).
+    Caught by actually running rolling_analyze.py end-to-end on a real
+    recording, not by the unit tests alone: a genuinely 2-second sustained
+    tone (two consecutive 1-second windows) was silently dropped because
+    its reported duration (1.0s, the gap between starts) fell short of the
+    2.0s default threshold, when its real coverage was the full 2.0s.
     """
     if not windows:
         return []
@@ -97,17 +115,7 @@ def find_sustained_bands(
     sustained = []
     for group in groups:
         start_s = group[0].start_s
-        # A group's *coverage* extends past its last window's start time by
-        # one window length, not just to the last start -- otherwise a
-        # group of back-to-back windows looks shorter than it really is.
-        # We don't have window_s here directly, so approximate duration
-        # from the span between window starts plus the hop between the
-        # first two overall windows if available, else fall back to the
-        # gap between this group's first and last window start.
-        if len(group) == 1:
-            duration_s = 0.0
-        else:
-            duration_s = group[-1].start_s - group[0].start_s
+        duration_s = (group[-1].start_s - group[0].start_s) + window_s
         if duration_s >= min_duration_s:
             mean_peak = sum(x.peak_hz for x in group) / len(group)
             sustained.append(
@@ -131,13 +139,15 @@ if __name__ == "__main__":
         print(f"usage: {sys.argv[0]} <path-to-wav>")
         sys.exit(1)
 
+    window_s = 2.0  # matches rolling_analyze()'s own default -- kept explicit
+    # here since find_sustained_bands needs the exact value, not a default.
     samples, sample_rate = load_wav_mono(sys.argv[1])
-    windows = list(rolling_analyze(samples, sample_rate))
+    windows = list(rolling_analyze(samples, sample_rate, window_s=window_s))
     print(f"{len(windows)} windows analyzed")
     for w in windows:
         print(f"  t={w.start_s:5.1f}s  peak={w.peak_hz:7.1f} Hz  band=[{w.lower_hz:.0f}, {w.upper_hz:.0f}] Hz")
 
-    sustained = find_sustained_bands(windows)
+    sustained = find_sustained_bands(windows, window_s=window_s)
     print(f"\n{len(sustained)} sustained band(s) (>= 2s, held within 200 Hz):")
     for s in sustained:
         print(

@@ -68,23 +68,23 @@ class RollingAnalyzeTests(unittest.TestCase):
 
 class FindSustainedBandsTests(unittest.TestCase):
     def test_empty_input_returns_empty(self):
-        self.assertEqual(find_sustained_bands([]), [])
+        self.assertEqual(find_sustained_bands([], window_s=1.0), [])
 
     def test_a_single_isolated_window_is_never_sustained(self):
         windows = [WindowResult(0.0, 1000.0, 900.0, 1100.0)]
-        self.assertEqual(find_sustained_bands(windows), [])
+        self.assertEqual(find_sustained_bands(windows, window_s=1.0), [])
 
     def test_a_long_stable_run_is_reported_as_one_sustained_band(self):
         windows = [WindowResult(float(i), 1000.0 + i, 900.0, 1100.0) for i in range(6)]  # 0..5s, jitters slightly
 
-        sustained = find_sustained_bands(windows, freq_tolerance_hz=200.0, min_duration_s=2.0)
+        sustained = find_sustained_bands(windows, window_s=1.0, freq_tolerance_hz=200.0, min_duration_s=2.0)
 
         self.assertEqual(len(sustained), 1)
         band = sustained[0]
         self.assertIsInstance(band, SustainedBand)
         self.assertEqual(band.start_s, 0.0)
         self.assertEqual(band.end_s, 5.0)
-        self.assertAlmostEqual(band.duration_s, 5.0)
+        self.assertAlmostEqual(band.duration_s, 6.0)  # (5-0) + window_s
         self.assertEqual(band.window_count, 6)
 
     def test_a_brief_spike_short_of_min_duration_is_not_reported(self):
@@ -97,11 +97,11 @@ class FindSustainedBandsTests(unittest.TestCase):
             + [WindowResult(float(i), 1000.0, 900.0, 1100.0) for i in range(4, 7)]  # 4,5,6s
         )
 
-        sustained = find_sustained_bands(windows, freq_tolerance_hz=200.0, min_duration_s=2.0)
+        sustained = find_sustained_bands(windows, window_s=1.0, freq_tolerance_hz=200.0, min_duration_s=2.0)
 
-        # The spike splits the run into two separate stable groups, each
-        # too short on its own (2s and 2s spans -- exactly at the boundary,
-        # both count) -- what matters is the spike itself never appears.
+        # The spike splits the run into two separate stable groups (3s
+        # each, with window_s folded in) -- what matters is the spike
+        # itself never appears in whatever comes back.
         for band in sustained:
             self.assertNotAlmostEqual(band.mean_peak_hz, 6000.0, delta=500.0)
 
@@ -110,7 +110,7 @@ class FindSustainedBandsTests(unittest.TestCase):
         high = [WindowResult(float(i), 5000.0, 4900.0, 5100.0) for i in range(4, 9)]  # 4..8s
         windows = low + high
 
-        sustained = find_sustained_bands(windows, freq_tolerance_hz=200.0, min_duration_s=2.0)
+        sustained = find_sustained_bands(windows, window_s=1.0, freq_tolerance_hz=200.0, min_duration_s=2.0)
 
         self.assertEqual(len(sustained), 2)
         self.assertAlmostEqual(sustained[0].mean_peak_hz, 1000.0)
@@ -122,7 +122,7 @@ class FindSustainedBandsTests(unittest.TestCase):
         # thing as one steady tone...
         drifting = [WindowResult(float(i), 1000.0 + 30 * i, 900.0, 1100.0) for i in range(5)]
 
-        loose = find_sustained_bands(drifting, freq_tolerance_hz=200.0, min_duration_s=1.0)
+        loose = find_sustained_bands(drifting, window_s=1.0, freq_tolerance_hz=200.0, min_duration_s=1.0)
         self.assertEqual(len(loose), 1)
         self.assertEqual(loose[0].window_count, 5)
 
@@ -132,7 +132,7 @@ class FindSustainedBandsTests(unittest.TestCase):
         # of one long one. Still real, sustained bands -- just smaller ones,
         # which is the actual point: tolerance changes the grouping, not
         # just an on/off switch for whether anything survives at all.
-        tighter = find_sustained_bands(drifting, freq_tolerance_hz=50.0, min_duration_s=1.0)
+        tighter = find_sustained_bands(drifting, window_s=1.0, freq_tolerance_hz=50.0, min_duration_s=1.0)
         self.assertGreater(len(tighter), 1)
         self.assertEqual(sum(g.window_count for g in tighter), 5)
 
