@@ -144,19 +144,72 @@ writeup: `haven-app/docs/llm-summary.md`.
   library (used in Mumble, OBS) that pairs classic DSP with a small
   recurrent network to suppress background/wind noise in real time
   ([project background](https://hobo.house/2024/03/01/easy-noise-suppression-with-rnnoise/)).
-  The genuinely relevant finding: **it's been ported and run in real time on
-  an STM32 microcontroller**
-  ([Real-Time RNN Speech Noise Suppression on a MCU](https://medium.com/analytics-vidhya/real-time-rnn-speech-noise-suppression-on-a-microcontroller-stm32-e17d8c3eac57)),
-  a similar embedded class to the nRF5340's Cortex-M33, with follow-up work
-  on mixed FP16/INT8 quantization specifically for multi-core MCU speech
-  enhancement ([arXiv:2210.07692](https://arxiv.org/pdf/2210.07692)). This
-  is a plausible on-device candidate for cleaning up the PDM mic signal
-  (wind/handling noise) before it reaches the hear-through path — distinct
-  from anything in Tier 1/2 above, and worth a real feasibility pass
-  (memory/cycle budget on the nRF5340 specifically) before committing to it,
-  not assumed to fit just because an STM32 port exists.
+  **Update 2026-09-27, after actually running the numbers: not a fit for
+  either of Haven's two obvious on-device placements, for two different
+  concrete reasons** — see below. Reframed to where it does fit.
 
-Neither of these is built. Both are real, cited, and buildable without
-inventing a dataset from scratch — a materially better starting position
-than this doc's original Tier 2 sketch (which assumed custom-recorded
-training data would be needed either way).
+Neither is built yet. Both are real and cited.
+
+## Update 2026-09-27: RNNoise feasibility, done properly with real numbers
+
+Last entry treated "there's an STM32 port" as enough to call this a plausible
+on-device candidate. That was too quick — actually placing it in Haven's real
+architecture rules out both obvious spots, for two different, specific
+reasons found by pulling real numbers rather than assuming a port on similar
+silicon means it fits everywhere.
+
+**RNNoise's real cost**: 96k parameters (~88k weights), ~40 MFLOPS total for
+real-time 48 kHz operation (17.5 MFLOPS DNN + 7.5 MFLOPS FFT/IFFT + 10 MFLOPS
+pitch search), per Jean-Marc Valin's own numbers
+([W3C talk](https://www.w3.org/2020/Talks/mlws/jmv_rnnoise.pdf)). The STM32
+port that prompted this ran on an STM32L476 (Cortex-M4, 80 MHz, 96 KB RAM),
+achieving real-time
+([Jianjia Ma's writeup](https://medium.com/analytics-vidhya/real-time-rnn-speech-noise-suppression-on-a-microcontroller-stm32-e17d8c3eac57)).
+
+**Placement 1 — the nRF5340 app core.** On paper this looks fine: 128 MHz
+(1.6x the STM32 port's clock) and 512 KB RAM (5x the STM32 port's, where
+RNNoise already ran real-time) comfortably cover the algorithm's raw
+MFLOPS/memory footprint. **But this is the wrong place regardless of whether
+it fits** — putting any real-time audio DSP on the nRF5340 app core is
+exactly the risk this project already decided against when it chose to keep
+the ADAU1860 rather than move filtering to the microcontroller (0.7-9 ms
+added hear-through latency, comb filtering, ~5.6 mA extra draw — see
+`HARDWARE_COST_ALTERNATIVES.md` in `haven-dev-board-kicad`). Fitting in terms
+of cycles and RAM doesn't matter if using them here reopens a latency
+decision that's already settled. Don't put it here.
+
+**Placement 2 — the ADAU1860's FastDSP core.** This is the chip that's
+actually supposed to own real-time audio, so it's the placement worth
+checking properly. Its real, cited number: FastDSP runs at 24.576 MHz and
+budgets 32 instructions per sample at a 192 kHz sample rate (the same rate
+this project's own `tools/dsp` work already recommends) — a datasheet figure
+sized for the always-on, per-sample arithmetic a biquad filter needs, not
+for general-purpose branching or matrix-vector work. RNNoise's DNN component
+runs per 10ms *frame* (not per sample) and needs a recurrent network with
+~88k weights evaluated each frame — categorically more (and a different
+shape of) computation than a 32-instruction-per-sample fixed-filter budget
+is built to hold, and there's no indication FastDSP has the program memory
+or instruction set for a matrix-multiply-heavy recurrent net at all. This
+reads as infeasible on the numbers available, not just "unconfirmed" —
+though I haven't seen FastDSP's full instruction set or program RAM size
+(the ADI datasheet PDF has twice failed to fetch directly from this
+session), so this should be a quick confirmation with ADI or in the full
+datasheet before being treated as fully certain.
+
+**Where it actually fits: the phone, not the device.** Neither the mic's
+real-time hear-through signal path nor the wearable's own compute is the
+right target. A phone CPU runs RNNoise trivially (its own reference
+numbers: 1.3% of one x86 core, and JS/WASM ports exist for exactly this).
+The right use is cleaning up **recordings**, not the live hear-through
+audio — e.g. denoising a clip before `ml/analyze.py`'s PSD-peak detection
+runs on it, or before the Tier 2 "continuous monitoring" idea processes a
+rolling window on the phone. That sidesteps both placement problems
+entirely: it's off the safety-critical, latency-critical real-time path, and
+it runs where compute is abundant. Worth prototyping there, not on-device.
+
+This is also the more general lesson from this pass, worth keeping in mind
+for anything else considered later: "a similar chip ran this" is a start,
+not a placement decision — check what the *specific* target core's budget
+actually is (FastDSP's real per-sample instruction count here) and whether
+the workload's natural shape (per-frame recurrent net vs. per-sample fixed
+filter) matches it, before calling something feasible.
