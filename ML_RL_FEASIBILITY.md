@@ -48,12 +48,38 @@ single most realistic, differentiated thing to build next, and it directly
 answers "help me find the setting that actually feels right" without ever
 touching the "detect the cause" question dishonestly.
 
-**A bandit-paced tolerance plan.** The existing tolerance-building feature
-(`constants/tolerance.ts`) steps `attenDb` down by a fixed 3 dB per week,
-always on explicit user tap. A small contextual bandit could instead adapt
-the step size or pacing based on the comfort check-in responses already
-being collected — still needs no big dataset, since it's learning from one
-person's own ongoing feedback, not a pretrained model.
+**A bandit-paced tolerance plan — built 2026-09-27, as an adaptive rule,
+not a bandit.** The existing tolerance-building feature
+(`constants/tolerance.ts`) steps `attenDb` down by a fixed amount, always
+on explicit user tap; this update adapts the *wait* before the next step
+becomes available, based on recent comfort check-in responses.
+
+Two things were wrong in the paragraph above before this got built, both
+worth recording rather than quietly fixing:
+
+1. **"the comfort check-in responses already being collected" was false.**
+   Checked before building on it: the comfort check-in only ever persisted
+   *when* it last fired (`ComfortStore`), never *what* the person answered.
+   The direction was used once to nudge `attenDb` and then discarded. Fixed
+   first — `ComfortHistoryStore` now persists a real rolling history
+   (`haven-app`) — before anything could adapt on it.
+2. **"a small contextual bandit" turned out to be the wrong tool once the
+   real data density was considered, not just a simplification.** A
+   comfort response happens at most about once a day; tolerance steps are
+   roughly a week apart. That's at most one or two data points between
+   decisions — nowhere near enough for a meaningful explore/exploit
+   tradeoff the way the depth/width tuner's dozen-comparisons-in-one-
+   sitting setup has. Built as a plain, documented rule instead
+   (`utils/tolerancePacing.ts`, haven-app): two "too strong" responses
+   since the last step double the wait; two comfortable/less-softening
+   responses halve it (with a floor and ceiling); anything mixed or absent
+   leaves it unchanged. Calling that a "bandit" would have been the
+   dishonest kind of overclaiming this document exists to avoid.
+
+25 new tests across the new history store, the pacing function, and both
+hooks it touches — including that the countdown UI (`TolerancePlanCard`)
+now reflects the actual adapted wait, not the fixed constant, which would
+have silently drifted out of sync with `dueForStep` otherwise.
 
 ## Tier 2 — buildable, needs more dev work, modest data
 
