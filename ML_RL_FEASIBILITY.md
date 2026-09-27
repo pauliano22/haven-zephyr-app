@@ -138,8 +138,27 @@ writeup: `haven-app/docs/llm-summary.md`.
   needs a custom dev client, not Expo Go or the web build — same
   constraint already blocking `react-native-ble-plx` bring-up, so this
   would ride along with that work rather than needing its own new
-  infrastructure. Not prototyped yet — worth doing once a dev-client build
-  exists for other reasons anyway.
+  infrastructure (the dev-client prep for that is now done — see
+  `haven-app/docs/dev-client-build.md`). Not prototyped yet.
+
+  **Update 2026-09-27, two more real data points, one of them a risk
+  flag**: YAMNet's own real latency number — about 100ms to process a 2s
+  audio window via a CPU delegate with 2 threads on Android
+  ([search-sourced benchmark](https://github.com/farmaker47/Yamnet_classification_project)) —
+  comfortably fits a non-real-time context-tagging use case (well under the
+  window length itself), consistent with keeping this off the hear-through
+  path as already scoped. Model file size wasn't confirmed to a specific
+  number this pass — don't cite one without checking the actual exported
+  file. The risk flag: `react-native-fast-tflite` (the binding this would
+  need) has a **documented GitHub issue**
+  ([mrousavy/react-native-fast-tflite#133](https://github.com/mrousavy/react-native-fast-tflite/issues/133))
+  reporting a build failure specifically with the New Architecture enabled
+  on iOS, at v1.6.0 / RN 0.77.1. Haven's app (RN 0.85.3) has the New
+  Architecture mandatorily enabled (Expo SDK 55+ removed the option to turn
+  it off), so this needs a direct check against a current library version
+  before committing to it — not assumed fine just because the library
+  exists and has a config plugin, the same lesson RNNoise's placement check
+  already taught this doc once.
 - **RNNoise for mic noise suppression** — a real, widely-shipped open-source
   library (used in Mumble, OBS) that pairs classic DSP with a small
   recurrent network to suppress background/wind noise in real time
