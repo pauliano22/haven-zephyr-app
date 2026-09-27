@@ -153,12 +153,17 @@ writeup: `haven-app/docs/llm-summary.md`.
   need) has a **documented GitHub issue**
   ([mrousavy/react-native-fast-tflite#133](https://github.com/mrousavy/react-native-fast-tflite/issues/133))
   reporting a build failure specifically with the New Architecture enabled
-  on iOS, at v1.6.0 / RN 0.77.1. Haven's app (RN 0.85.3) has the New
-  Architecture mandatorily enabled (Expo SDK 55+ removed the option to turn
-  it off), so this needs a direct check against a current library version
-  before committing to it — not assumed fine just because the library
-  exists and has a config plugin, the same lesson RNNoise's placement check
-  already taught this doc once.
+  on iOS, at v1.6.0 / RN 0.77.1. **Follow-up, same day: checked the issue's
+  actual resolution rather than leaving it as an open flag.** It's closed,
+  and the real root cause was narrower than "New Architecture
+  incompatibility" — v1.6.0's npm release shipped without a required `spec`
+  folder needed for New Arch codegen (a packaging oversight, not a design
+  incompatibility); it didn't happen on v1.5.0 or with the New Architecture
+  disabled. This meaningfully de-risks the library for this project: the
+  New Architecture support itself isn't the problem, one specific release's
+  packaging was. Still worth confirming the version actually installed
+  isn't the broken v1.6.0 specifically before relying on it, but this is no
+  longer an open question the way it was left last update.
 - **RNNoise for mic noise suppression** — a real, widely-shipped open-source
   library (used in Mumble, OBS) that pairs classic DSP with a small
   recurrent network to suppress background/wind noise in real time
