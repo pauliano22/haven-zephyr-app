@@ -126,6 +126,18 @@ is future integration work, same scoping `apply_over_ble.py` already uses.
 python3 rolling_analyze.py recording.wav
 ```
 
+**Now wired into `apply_over_ble.py`** via `--rolling`: instead of writing
+whatever `analyze.py`'s single whole-clip pass happens to find dominant,
+it applies the *longest* sustained band found across the recording, and
+refuses to apply anything at all if nothing held for at least
+`--min-duration` seconds (default 2.0) — a brief transient never gets
+written over BLE as if it were a real ongoing problem.
+
+```bash
+python3 apply_over_ble.py recording.wav --rolling --dry-run
+python3 apply_over_ble.py recording.wav --rolling --min-duration 3.0
+```
+
 ## `experiments/`
 
 Reproducible one-off feasibility checks that aren't part of the shipped

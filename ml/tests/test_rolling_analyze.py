@@ -86,6 +86,27 @@ class FindSustainedBandsTests(unittest.TestCase):
         self.assertEqual(band.end_s, 5.0)
         self.assertAlmostEqual(band.duration_s, 6.0)  # (5-0) + window_s
         self.assertEqual(band.window_count, 6)
+        # Every window here uses the same [900, 1100] band edges -- the mean
+        # across the group should just be that same constant width.
+        self.assertAlmostEqual(band.mean_lower_hz, 900.0)
+        self.assertAlmostEqual(band.mean_upper_hz, 1100.0)
+
+    def test_mean_band_edges_average_varying_widths_across_the_group(self):
+        # Band edges widen from window to window even though the peak (and
+        # therefore the grouping decision) stays put -- mean_lower/upper_hz
+        # should reflect that, not just echo the peak's own neighborhood.
+        windows = [
+            WindowResult(0.0, 1000.0, 950.0, 1050.0),
+            WindowResult(1.0, 1000.0, 900.0, 1100.0),
+            WindowResult(2.0, 1000.0, 850.0, 1150.0),
+        ]
+
+        sustained = find_sustained_bands(windows, window_s=1.0, min_duration_s=1.0)
+
+        self.assertEqual(len(sustained), 1)
+        band = sustained[0]
+        self.assertAlmostEqual(band.mean_lower_hz, (950.0 + 900.0 + 850.0) / 3)
+        self.assertAlmostEqual(band.mean_upper_hz, (1050.0 + 1100.0 + 1150.0) / 3)
 
     def test_a_brief_spike_short_of_min_duration_is_not_reported(self):
         # A stable run, then a very different single-window spike, then back

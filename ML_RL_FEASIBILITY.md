@@ -97,6 +97,22 @@ call on the whole clip would. Still fixed DSP, not a learned model — see
 `ml/README.md`. Operates on a batch of samples (a recording) here; wiring
 it to a live feed is future integration work, not done here.
 
+**Update, same day: wired into `apply_over_ble.py`** (`--rolling`), closing
+the loop from "a recording with a changing/transient environment" to "the
+board is filtering for the tone that actually held, not whichever one a
+single whole-clip estimate happened to pick." Real, demonstrated
+difference: on a 6-second test clip (1200 Hz for the first 3s, 3000 Hz for
+the last 3s), the plain whole-clip mode reports 3000 Hz, while `--rolling`
+correctly identifies 1200 Hz as the longer-sustained tone (it lands on more
+full windows given the specific window/hop timing) — not a coincidence
+either way beats the other in general, just a real example of the two
+modes genuinely disagreeing and `--rolling` being the one asking the better
+question. Also refuses to apply anything when nothing held steady for the
+minimum duration, rather than writing a transient over BLE as if it were an
+ongoing problem. `SustainedBand` gained `mean_lower_hz`/`mean_upper_hz`
+(needed to actually encode a FreqRange payload — the mean peak alone isn't
+a band). 5 new tests.
+
 **On-device sound-event classification.** Nordic officially supports Edge
 Impulse's tinyML workflow on the nRF5340 — train a small sound classifier
 (traffic, machinery, alarm, speech, quiet) and run it directly on the

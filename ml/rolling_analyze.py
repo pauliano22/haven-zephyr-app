@@ -29,12 +29,23 @@ class WindowResult(NamedTuple):
 
 class SustainedBand(NamedTuple):
     """A problem tone that held roughly steady for at least min_duration_s,
-    as opposed to a brief transient."""
+    as opposed to a brief transient.
+
+    mean_lower_hz/mean_upper_hz average each constituent window's own
+    -3dB band edges -- this is what a caller actually needs to apply the
+    band over BLE (ble_translator.encode_freq_range() takes a [lower,
+    upper] range, not a single peak); mean_peak_hz alone isn't enough for
+    that. Kept separately rather than derived from mean_peak_hz because the
+    band's width can genuinely vary window to window even while the peak
+    itself stays put.
+    """
 
     start_s: float
     end_s: float
     duration_s: float
     mean_peak_hz: float
+    mean_lower_hz: float
+    mean_upper_hz: float
     window_count: int
 
 
@@ -118,12 +129,16 @@ def find_sustained_bands(
         duration_s = (group[-1].start_s - group[0].start_s) + window_s
         if duration_s >= min_duration_s:
             mean_peak = sum(x.peak_hz for x in group) / len(group)
+            mean_lower = sum(x.lower_hz for x in group) / len(group)
+            mean_upper = sum(x.upper_hz for x in group) / len(group)
             sustained.append(
                 SustainedBand(
                     start_s=start_s,
                     end_s=group[-1].start_s,
                     duration_s=duration_s,
                     mean_peak_hz=mean_peak,
+                    mean_lower_hz=mean_lower,
+                    mean_upper_hz=mean_upper,
                     window_count=len(group),
                 )
             )
@@ -152,5 +167,6 @@ if __name__ == "__main__":
     for s in sustained:
         print(
             f"  {s.start_s:.1f}s-{s.end_s:.1f}s ({s.duration_s:.1f}s, "
-            f"{s.window_count} windows): ~{s.mean_peak_hz:.0f} Hz"
+            f"{s.window_count} windows): ~{s.mean_peak_hz:.0f} Hz "
+            f"[{s.mean_lower_hz:.0f}, {s.mean_upper_hz:.0f}] Hz"
         )
