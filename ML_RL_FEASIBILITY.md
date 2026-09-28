@@ -190,6 +190,26 @@ writeup: `haven-app/docs/llm-summary.md`.
   packaging was. Still worth confirming the version actually installed
   isn't the broken v1.6.0 specifically before relying on it, but this is no
   longer an open question the way it was left last update.
+
+  **Checked whether YAMNet could be prototyped on the web build instead of
+  waiting on the dev-client build — it can't, at least not the easy way.**
+  The idea: `@tensorflow/tfjs` (the plain browser package, unrelated to
+  `tfjs-react-native`, which needs `expo-gl` and doesn't work in a managed
+  web build anyway) runs completely normally in Expo's web target, since
+  that's just an ordinary web bundle. If a ready-made TFJS YAMNet existed,
+  it could've been prototyped and tested today, the same way the LLM-relay
+  and rolling-analysis work was, sidestepping the dev-client wait entirely.
+  Checked directly rather than assumed: TF Hub's own URL convention for a
+  ready TFJS export (`?tfjs-format=compressed` appended to a model's TF Hub
+  URL) returns a real 404 for YAMNet — confirmed with a direct fetch, not
+  inferred from documentation. No official TFJS-converted YAMNet exists via
+  that path. Building one would mean running `tensorflowjs_converter`
+  against the raw TF Hub SavedModel myself, a real undertaking (needs the
+  Python TF toolchain, produces an artifact with no ground truth to
+  validate it against without separately obtained reference audio) — not
+  something to attempt speculatively without a clearer reason to invest in
+  it. YAMNet stays exactly where the last update left it: real, cited,
+  waiting on the dev-client build, not on this web shortcut.
 - **RNNoise for mic noise suppression** — a real, widely-shipped open-source
   library (used in Mumble, OBS) that pairs classic DSP with a small
   recurrent network to suppress background/wind noise in real time
