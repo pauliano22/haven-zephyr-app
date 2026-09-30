@@ -83,14 +83,35 @@ have silently drifted out of sync with `dueForStep` otherwise.
 
 ## Tier 2 — buildable, needs more dev work, modest data
 
-**Continuous (not offline-batch) version of the existing PSD tool.** The
-`ml/analyze.py` heuristic that already exists (Welch PSD, dominant-peak
-half-power bandwidth) currently runs on a single recorded .wav file. Running
-the same math over a rolling window of live mic audio — on the phone, or
-on-device — turns "what was the troublesome frequency in this recording"
-into "what's the troublesome frequency right now." This is still fixed DSP,
-not a learned model, and it's the honest, buildable version of "figure out
-what in the environment is bothering me."
+**Continuous (not offline-batch) version of the existing PSD tool — built
+2026-09-27.** `ml/rolling_analyze.py` slides a window across a longer
+recording, running the same `find_troublesome_band` heuristic on each one,
+and `find_sustained_bands()` separates a genuinely sustained tone (held
+roughly steady for a couple of seconds or more) from a brief transient (a
+door slam, a single loud moment) that a single window might flag but that
+isn't worth alerting on. 10 new tests, including one that demonstrates the
+actual point directly: a recording where the dominant tone changes from
+1 kHz to 4 kHz partway through is correctly tracked as two different
+periods, not averaged into one answer the way a single `analyze_file()`
+call on the whole clip would. Still fixed DSP, not a learned model — see
+`ml/README.md`. Operates on a batch of samples (a recording) here; wiring
+it to a live feed is future integration work, not done here.
+
+**Update, same day: wired into `apply_over_ble.py`** (`--rolling`), closing
+the loop from "a recording with a changing/transient environment" to "the
+board is filtering for the tone that actually held, not whichever one a
+single whole-clip estimate happened to pick." Real, demonstrated
+difference: on a 6-second test clip (1200 Hz for the first 3s, 3000 Hz for
+the last 3s), the plain whole-clip mode reports 3000 Hz, while `--rolling`
+correctly identifies 1200 Hz as the longer-sustained tone (it lands on more
+full windows given the specific window/hop timing) — not a coincidence
+either way beats the other in general, just a real example of the two
+modes genuinely disagreeing and `--rolling` being the one asking the better
+question. Also refuses to apply anything when nothing held steady for the
+minimum duration, rather than writing a transient over BLE as if it were an
+ongoing problem. `SustainedBand` gained `mean_lower_hz`/`mean_upper_hz`
+(needed to actually encode a FreqRange payload — the mean peak alone isn't
+a band). 5 new tests.
 
 **On-device sound-event classification.** Nordic officially supports Edge
 Impulse's tinyML workflow on the nRF5340 — train a small sound classifier

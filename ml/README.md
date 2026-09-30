@@ -105,6 +105,39 @@ frequency-detection heuristic against synthetic single- and dual-tone test
 signals (including confirming `search_min_hz`/`search_max_hz` actually
 changes which tone gets picked as dominant).
 
+## `rolling_analyze.py` — continuous version, over a longer recording
+
+`analyze.py` runs once on a whole clip. `rolling_analyze.py` slides a
+window across a longer recording instead, calling the same
+`find_troublesome_band` heuristic on each window, so a problem tone that
+appears, changes, or ends partway through the recording shows up as that,
+rather than getting averaged into one (possibly wrong) answer for the whole
+clip. `find_sustained_bands()` then separates a genuinely sustained tone
+(held roughly steady for at least a couple of seconds) from a brief
+transient (a door slam, a single loud moment) that a single window might
+flag but that isn't worth alerting on.
+
+Still deterministic DSP — same heuristic, same lack of training data, same
+honesty about what it is (see `ML_RL_FEASIBILITY.md`, repo root, Tier 2).
+Operates on a batch of samples (a recording) here; wiring it to a live feed
+is future integration work, same scoping `apply_over_ble.py` already uses.
+
+```bash
+python3 rolling_analyze.py recording.wav
+```
+
+**Now wired into `apply_over_ble.py`** via `--rolling`: instead of writing
+whatever `analyze.py`'s single whole-clip pass happens to find dominant,
+it applies the *longest* sustained band found across the recording, and
+refuses to apply anything at all if nothing held for at least
+`--min-duration` seconds (default 2.0) — a brief transient never gets
+written over BLE as if it were a real ongoing problem.
+
+```bash
+python3 apply_over_ble.py recording.wav --rolling --dry-run
+python3 apply_over_ble.py recording.wav --rolling --min-duration 3.0
+```
+
 ## `experiments/`
 
 Reproducible one-off feasibility checks that aren't part of the shipped
