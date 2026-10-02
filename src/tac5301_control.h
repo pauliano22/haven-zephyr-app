@@ -117,4 +117,29 @@ int tac5301_control_set_volume_pct(uint8_t volume_pct);
  */
 int tac5301_control_set_mute(bool muted);
 
+/* ── Hardware output ceiling ──────────────────────────────────────────────
+ * Mirrors adau1860_control_set_output_ceiling_db()'s role (a cap the app
+ * protocol never reaches), but NOT its architecture, and that difference
+ * is real, not cosmetic: the ADAU1860 has a genuinely separate gain stage
+ * (DAC_VOL0) after its FastDSP volume slot, so the ceiling is enforced by
+ * hardware the BLE-exposed volume control physically cannot write to. The
+ * TAC5301-Q1 has only one DVOL register pair for its entire output gain --
+ * datasheet section 7 doesn't give this part a second, independent stage.
+ * This driver enforces the ceiling in software instead: every
+ * tac5301_control_set_volume_pct() call clamps its own result against the
+ * ceiling before writing the single shared register. That is a weaker
+ * safety property than the ADAU1860's -- a bug in this driver's own
+ * clamping code could in principle let a requested volume exceed the
+ * ceiling, which is structurally impossible on the ADAU1860 (the volume-
+ * setting code path cannot reach DAC_VOL0 at all). Range -100..+27 dB,
+ * matching the DVOL register's own native range (datasheet
+ * 7.1.1.73/.75) -- wider than the ADAU1860's 24..-60, a real difference
+ * in what each chip's hardware can represent, not a copy-paste number.
+ * Rejects out-of-range input (-EINVAL) rather than silently clamping it,
+ * matching the ADAU1860 driver's own choice to treat that as a caller
+ * bug worth surfacing, not something to paper over.
+ */
+int tac5301_control_set_output_ceiling_db(int ceiling_db);
+int tac5301_control_get_output_ceiling_db(void);
+
 #endif /* HAVEN_TAC5301_CONTROL_H_ */
