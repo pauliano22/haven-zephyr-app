@@ -113,14 +113,34 @@
  * tac5301_control.c's biquad_to_words() implements this; its own comment
  * carries the same citation and flags the safety stakes of getting it
  * wrong (a silently-wrong filter shape, not an error).
+ *
+ * CORRECTED (second pass, same session): the DAC page numbers below were
+ * off by one -- 16/17 instead of 15/16 -- found by reading section 7.2
+ * directly instead of trusting the earlier transcription from Table 6-42.
+ * Confirmed from each page's own section header text: section 7.2.5 says
+ * "This register page ... consists of the programmable coefficients for
+ * the DAC biquad 1 to biquad 6 filters" (i.e. page 15, not 16); 7.2.6 says
+ * the same for "DAC biquad 7 to biquad 12" (page 16, not 17); page 17 is
+ * NOT a biquad coefficient page at all -- its own header (7.2.7) says it
+ * "consists of the programmable coefficients for the ASI DIN mixer...
+ * Loopback mixer, Signal-generator mixer and the DAC first-order IIR
+ * filter." With the original wrong numbers, this driver's DAC filter-9
+ * slot (TAC5301_DAC_CH1_BQ_C) would have written 20 bytes into live
+ * mixer/HPF configuration registers instead of a biquad -- worse than a
+ * no-op, a real corruption of unrelated device state. Independently
+ * cross-checked against SLAAEH6's own worked I2C script example (section
+ * 3.6), which selects page 15 for DAC filters 1/5 and page 16 for filter
+ * 9, matching the corrected numbers here, not the original ones. The ADC
+ * side (8/9) was double-confirmed consistent between both documents and
+ * was never wrong.
  */
 #define TAC5301_BIQUAD_COEFF_COUNT 5 /* N0, N1, N2, D1, D2 */
 #define TAC5301_BIQUAD_REG_COUNT 20  /* 5 coeffs x 4 bytes */
 
 #define TAC5301_PAGE_ADC_BQ_1_6  8
 #define TAC5301_PAGE_ADC_BQ_7_12 9
-#define TAC5301_PAGE_DAC_BQ_1_6  16
-#define TAC5301_PAGE_DAC_BQ_7_12 17
+#define TAC5301_PAGE_DAC_BQ_1_6  15
+#define TAC5301_PAGE_DAC_BQ_7_12 16
 
 /* Channel-1 biquad A/B/C: (page, first register). */
 #define TAC5301_ADC_CH1_BQ_A_PAGE TAC5301_PAGE_ADC_BQ_1_6
@@ -131,10 +151,10 @@
 #define TAC5301_ADC_CH1_BQ_C_REG  48  /* filter 9, P9_R48-R67 */
 
 #define TAC5301_DAC_CH1_BQ_A_PAGE TAC5301_PAGE_DAC_BQ_1_6
-#define TAC5301_DAC_CH1_BQ_A_REG  8   /* filter 1, P16_R8-R27 */
+#define TAC5301_DAC_CH1_BQ_A_REG  8   /* filter 1, P15_R8-R27 */
 #define TAC5301_DAC_CH1_BQ_B_PAGE TAC5301_PAGE_DAC_BQ_1_6
-#define TAC5301_DAC_CH1_BQ_B_REG  88  /* filter 5, P16_R88-R107 */
+#define TAC5301_DAC_CH1_BQ_B_REG  88  /* filter 5, P15_R88-R107 */
 #define TAC5301_DAC_CH1_BQ_C_PAGE TAC5301_PAGE_DAC_BQ_7_12
-#define TAC5301_DAC_CH1_BQ_C_REG  48  /* filter 9, P17_R48-R67 */
+#define TAC5301_DAC_CH1_BQ_C_REG  48  /* filter 9, P16_R48-R67 */
 
 #endif /* HAVEN_TAC5301_REGS_H_ */

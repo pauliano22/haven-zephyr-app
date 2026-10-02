@@ -133,6 +133,33 @@ static void test_biquad_to_words_matches_ti_app_note_conversion(void)
 	CHECK(words[4] == 0xE0000000u);
 }
 
+/* Pins the DAC biquad page numbers against literal values transcribed
+ * directly from the datasheet's own page-7.2.5/7.2.6/7.2.7 section
+ * headers ("consists of the programmable coefficients for the DAC
+ * biquad 1 to biquad 6 filters" = page 15; "...7 to biquad 12..." = page
+ * 16; page 17 is a DIFFERENT set of registers entirely -- ASI DIN mixer /
+ * loopback mixer / DAC first-order IIR filter, not biquads at all).
+ * Checked against the literal numbers, not the macros that define them --
+ * a self-referential check against TAC5301_PAGE_DAC_BQ_1_6 would still
+ * pass if that constant were wrong, which is exactly the bug this test
+ * exists to catch (the original value was 16/17, one page off, which
+ * would have written biquad-9 coefficients into live mixer/HPF
+ * configuration registers instead of a biquad).
+ */
+static void test_dac_biquad_pages_match_datasheet_literally(void)
+{
+	CHECK(TAC5301_PAGE_DAC_BQ_1_6 == 15);
+	CHECK(TAC5301_PAGE_DAC_BQ_7_12 == 16);
+	CHECK(TAC5301_DAC_CH1_BQ_A_PAGE == 15);
+	CHECK(TAC5301_DAC_CH1_BQ_B_PAGE == 15);
+	CHECK(TAC5301_DAC_CH1_BQ_C_PAGE == 16);
+	/* Page 17 must never be touched by biquad writes -- confirm no slot
+	 * page constant equals 17. */
+	CHECK(TAC5301_DAC_CH1_BQ_A_PAGE != 17);
+	CHECK(TAC5301_DAC_CH1_BQ_B_PAGE != 17);
+	CHECK(TAC5301_DAC_CH1_BQ_C_PAGE != 17);
+}
+
 static void test_init_sets_3_biquads_per_channel(void)
 {
 	haven_fake_i2c_reset();
@@ -340,6 +367,7 @@ int main(void)
 	RUN(test_q31_encode_roundtrip);
 	RUN(test_q31_encode_saturates);
 	RUN(test_unity_biquad_matches_reset_value);
+	RUN(test_dac_biquad_pages_match_datasheet_literally);
 	RUN(test_biquad_to_words_matches_ti_app_note_conversion);
 	RUN(test_init_sets_3_biquads_per_channel);
 	RUN(test_init_enables_only_loopback_mixer);
