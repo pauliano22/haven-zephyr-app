@@ -18,6 +18,7 @@
  */
 #include "tac5301_control.h"
 #include "tac5301_regs.h"
+#include "tone_gen.h"
 
 #include <errno.h>
 #include <math.h>
@@ -265,11 +266,137 @@ static int write_dac_dvol(uint8_t code)
 	return reg_write8(TAC5301_REG_DAC_CH1B_DVOL, code);
 }
 
+/* The DVOL registers above are this chip's ONLY mute mechanism (unlike the
+ * ADAU1860's separate DAC_CTRL2 mute bit, independent of its volume
+ * register) -- so a tone-route switch's own "mute for the switch, unmute
+ * after" step and a genuine user mute share one register. Writing this
+ * instead of unconditionally un-muting means a user-muted device stays
+ * silent through a tone start/stop rather than the route switch itself
+ * briefly revealing the tone. */
+static int write_dac_dvol_effective(void)
+{
+	return write_dac_dvol(muted ? TAC5301_DVOL_MUTE_CODE : (uint8_t)current_dvol_code);
+}
+
+/* ── LDL calibration tone ─────────────────────────────────────────────────
+ * Mirrors adau1860_control.c's tone-path role (the tone is synthesised on
+ * the nRF5340 by tone_gen.c -- codec-agnostic, reused as-is -- and arrives
+ * over I2S0 into this chip's ASI; this file's job is only getting that
+ * signal to the DAC and back out again cleanly) but not its exact
+ * mechanism, for two real reasons specific to this chip:
+ *
+ * 1. Routing: the ADAU1860 has one DAC input mux (DAC_ROUTE0) that picks
+ *    exactly one source. The TAC5301-Q1 has independent mixer ENABLE bits
+ *    (MIXER_CFG0) instead -- EN_LOOPBACK_MIXER and EN_DAC_ASI_MIXER are
+ *    separate bits that would ADD together if both were left on, not
+ *    switch exclusively like a mux. Engaging the tone route here
+ *    explicitly turns the loopback bit OFF while turning the ASI bit ON,
+ *    and disengage does the reverse -- getting this backwards (e.g. only
+ *    setting the ASI bit without clearing loopback) would mix the tone
+ *    with live ambient sound, defeating the point of a calibration tone
+ *    at a known, uncontaminated level.
+ * 2. No ASRC-lock wait: the ADAU1860 driver polls STATUS2 for input-ASRC
+ *    lock before unmuting into the tone, because its PLL/clock domain is
+ *    something the driver explicitly brings up and can observe locking.
+ *    This driver's init already assumes BCLK/FSYNC are running
+ *    continuously before any I2C traffic happens at all (per
+ *    TAC5301_BENCH_EXPERIMENT.md's bring-up procedure), and no datasheet
+ *    register surfaced an equivalent "ASI data valid" status bit to poll
+ *    -- so there's no wait here. This is an assumption carried over from
+ *    the bench procedure's own assumption, not a verified absence; if a
+ *    real device shows an audible glitch at tone start, this is the first
+ *    place to look, not something already ruled out.
+ */
+static K_MUTEX_DEFINE(tone_route_lock);
+static bool tone_route_engaged;
+
+#ifdef CONFIG_HAVEN_TONE_FULL_SCALE_DB
+#define TAC5301_TONE_FULL_SCALE_DB ((float)CONFIG_HAVEN_TONE_FULL_SCALE_DB)
+#else
+#define TAC5301_TONE_FULL_SCALE_DB 85.0f
+#endif
+
+/* Same mapping as adau1860_tone_gain_q15() -- codec-agnostic math, the
+ * nominal full-scale constant is a board/calibration property, not a
+ * per-codec one, so it's deliberately the same Kconfig symbol. */
+int32_t tac5301_tone_gain_q15(float level_db)
+{
+	float rel_db = level_db - TAC5301_TONE_FULL_SCALE_DB;
+
+	if (rel_db >= 0.0f) {
+		return TONE_GEN_GAIN_ONE;
+	}
+	if (rel_db < -96.0f) {
+		return 0;
+	}
+	return (int32_t)lrint(pow(10.0, (double)rel_db / 20.0) * (double)TONE_GEN_GAIN_ONE);
+}
+
+static int tone_route_engage(void)
+{
+	int err = 0;
+
+	if (!initialised) {
+		return 0;
+	}
+	k_mutex_lock(&tone_route_lock, K_FOREVER);
+	if (!tone_route_engaged) {
+		err = write_dac_dvol(TAC5301_DVOL_MUTE_CODE);
+		if (!err) {
+			err = reg_write8(TAC5301_REG_MIXER_CFG0, TAC5301_MIXER_EN_DAC_ASI_MIXER);
+		}
+		if (!err) {
+			err = write_dac_dvol_effective();
+		}
+		tone_route_engaged = true;
+	}
+	k_mutex_unlock(&tone_route_lock);
+	return err;
+}
+
+static int tone_route_disengage(void)
+{
+	int err = 0;
+
+	if (!initialised) {
+		return 0;
+	}
+	k_mutex_lock(&tone_route_lock, K_FOREVER);
+	if (tone_route_engaged) {
+		err = write_dac_dvol(TAC5301_DVOL_MUTE_CODE);
+		if (!err) {
+			err = reg_write8(TAC5301_REG_MIXER_CFG0, TAC5301_MIXER_EN_LOOPBACK_MIXER);
+		}
+		if (!err) {
+			err = write_dac_dvol_effective();
+		}
+		tone_route_engaged = false;
+	}
+	k_mutex_unlock(&tone_route_lock);
+	return err;
+}
+
+/* Runs on the tone_gen feeder thread once the I2S link has actually gone
+ * quiet (ramp-down played out, peripheral stopped) -- registered in
+ * tac5301_control_init(), same hook adau1860_control.c uses. */
+static void on_tone_stopped(void)
+{
+	int err = tone_route_disengage();
+
+	if (err) {
+		LOG_ERR("Restoring hear-through route after tone failed: %d", err);
+	} else {
+		LOG_INF("Tone finished -- hear-through route restored");
+	}
+}
+
 /* ── Public API ──────────────────────────────────────────────────────── */
 
 int tac5301_control_init(void)
 {
 	int err;
+
+	tone_gen_set_stopped_callback(on_tone_stopped);
 
 	if (!device_is_ready(bus.bus)) {
 		LOG_ERR("I2C bus for the TAC5301-Q1 not ready");
@@ -496,4 +623,69 @@ int tac5301_control_set_output_ceiling_db(int ceiling_db)
 int tac5301_control_get_output_ceiling_db(void)
 {
 	return output_ceiling_db;
+}
+
+int tac5301_control_set_tone(float f0_hz, float level_db)
+{
+	/* Caller (tone_safety.c) has already clamped level_db to
+	 * [PROTOCOL_TONE_LEVEL_MIN_DB, PROTOCOL_TONE_LEVEL_MAX_DB]. */
+	int32_t gain = tac5301_tone_gain_q15(level_db);
+
+	LOG_INF("Tone: f0=%.1f Hz level=%.1f dB -> gain %ld/32768 (DAC ASI mixer, loopback paused)",
+		(double)f0_hz, (double)level_db, (long)gain);
+
+	/* I2S first, same ordering rationale as the ADAU1860 driver (give the
+	 * codec a clock/data stream before switching the mixer onto it) even
+	 * though this chip's own ASI doesn't need an explicit lock wait. */
+	int err = tone_gen_start(f0_hz, gain);
+
+	if (err) {
+		LOG_ERR("Tone generator start failed: %d", err);
+		return err;
+	}
+	return tone_route_engage();
+}
+
+int tac5301_control_set_tone_level(float level_db)
+{
+	int32_t gain = tac5301_tone_gain_q15(level_db);
+
+	LOG_INF("Tone level: %.1f dB -> gain %ld/32768", (double)level_db, (long)gain);
+	return tone_gen_set_gain(gain);
+}
+
+int tac5301_control_stop_tone(void)
+{
+	LOG_INF("Tone stop");
+	int err = tone_gen_stop();
+
+	if (err) {
+		/* No generator (bench without I2S, or init failed): nothing is
+		 * playing, but make sure the codec isn't left routed to the
+		 * ASI mixer. */
+		return tone_route_disengage();
+	}
+	/* Route restore follows from the feeder thread (on_tone_stopped) once
+	 * the ramp-down has actually played. */
+	return 0;
+}
+
+void tac5301_control_on_ble_connected(void)
+{
+	LOG_INF("BLE connected -- filters unchanged");
+}
+
+void tac5301_control_on_ble_disconnected(void)
+{
+	/* Filters keep running -- hearing protection must not depend on the
+	 * phone. The tone must not either: main.c's tone_safety_stop() already
+	 * stops the generator; this is the second layer, restoring the codec
+	 * route synchronously (under soft mute) even if the feeder thread's
+	 * callback is late or never comes. Idempotent. */
+	int err = tone_route_disengage();
+
+	if (err) {
+		LOG_ERR("Route restore on BLE disconnect failed: %d", err);
+	}
+	LOG_INF("BLE disconnected -- filters kept running, tone route restored");
 }
