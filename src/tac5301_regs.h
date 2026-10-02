@@ -91,30 +91,56 @@
  * Each biquad occupies 20 registers = 5 coefficients (N0, N1, N2, D1, D2) x
  * 4 bytes each, big-endian within each 32-bit coefficient (BYT1 = bits
  * [31:24] first on the wire, per the register map, e.g. 7.2.1's
- * ADC_BQ1_N0_BYT1..BYT4). The transfer function (datasheet Equation 2/4) is
- * H(z) = (N0 + N1 z^-1 + N2 z^-2) / (1 + D1 z^-1 + D2 z^-2) -- note this is
- * the *unnegated* textbook form (D1 = a1, D2 = a2 directly), unlike the
- * ADAU1860's FastDSP convention which stores feedback taps negated. This is
- * inferred from the register naming (N.../D... matching the standard
- * biquad transfer function, not a FastDSP-style "feedback tap" name) and
- * from the reset coefficients only producing a stable all-pass at N0=unity/
- * everything else 0 under this convention -- not an explicit sign-convention
- * statement in the datasheet text. Verify with a real coefficient readback
- * or a bench sweep before trusting this for a safety-relevant filter.
+ * ADC_BQ1_N0_BYT1..BYT4).
  *
- * Coefficient encoding: reset N0 = 0x7FFFFFFF, which is two's-complement
- * Q1.31's closest representable value to +1.0 (2^31 - 1, since Q1.31 cannot
- * represent exactly +1.0) -- a reasonable inference from the reset value,
- * not an explicit "Q1.31" statement in this datasheet. See
- * TAC5301_BENCH_EXPERIMENT.md (haven-dev-board-kicad) for the same caveat.
+ * CORRECTED (an earlier version of this comment guessed an unnegated,
+ * unscaled "textbook" convention -- wrong on 3 of 5 terms). TI's own
+ * application note (SLAAEH6, "TAC5x1x and TAC5x1x-Q1 Programmable Biquad
+ * Filters - Configuration and Applications", section 3) gives the real
+ * transfer function and conversion explicitly, not inferred:
+ *
+ *   H(z) = (N0 + 2*N1*z^-1 + N2*z^-2) / (2 - 2*D1*z^-1 + D2*z^-2)
+ *
+ * Converting from standard RBJ [b0,b1,b2,a1,a2] (a0 normalized to 1):
+ *   N0 = b0, N1 = b1/2, N2 = b2, D1 = -a1/2, D2 = -a2
+ * each then encoded to Q1.31 (multiply by 2^31, round, two's complement --
+ * SLAAEH6 section 3.2 gives a full worked numeric example). Coefficient
+ * encoding is Q1.31 confirmed explicitly by SLAAEH6 section 3 ("With the
+ * Q-point located in the 31st bit location (Q31), the filter coefficients
+ * are in 1.31 format") -- not inferred, as an earlier version of this
+ * comment had it from the reset value alone.
+ *
+ * tac5301_control.c's biquad_to_words() implements this; its own comment
+ * carries the same citation and flags the safety stakes of getting it
+ * wrong (a silently-wrong filter shape, not an error).
+ *
+ * CORRECTED (second pass, same session): the DAC page numbers below were
+ * off by one -- 16/17 instead of 15/16 -- found by reading section 7.2
+ * directly instead of trusting the earlier transcription from Table 6-42.
+ * Confirmed from each page's own section header text: section 7.2.5 says
+ * "This register page ... consists of the programmable coefficients for
+ * the DAC biquad 1 to biquad 6 filters" (i.e. page 15, not 16); 7.2.6 says
+ * the same for "DAC biquad 7 to biquad 12" (page 16, not 17); page 17 is
+ * NOT a biquad coefficient page at all -- its own header (7.2.7) says it
+ * "consists of the programmable coefficients for the ASI DIN mixer...
+ * Loopback mixer, Signal-generator mixer and the DAC first-order IIR
+ * filter." With the original wrong numbers, this driver's DAC filter-9
+ * slot (TAC5301_DAC_CH1_BQ_C) would have written 20 bytes into live
+ * mixer/HPF configuration registers instead of a biquad -- worse than a
+ * no-op, a real corruption of unrelated device state. Independently
+ * cross-checked against SLAAEH6's own worked I2C script example (section
+ * 3.6), which selects page 15 for DAC filters 1/5 and page 16 for filter
+ * 9, matching the corrected numbers here, not the original ones. The ADC
+ * side (8/9) was double-confirmed consistent between both documents and
+ * was never wrong.
  */
 #define TAC5301_BIQUAD_COEFF_COUNT 5 /* N0, N1, N2, D1, D2 */
 #define TAC5301_BIQUAD_REG_COUNT 20  /* 5 coeffs x 4 bytes */
 
 #define TAC5301_PAGE_ADC_BQ_1_6  8
 #define TAC5301_PAGE_ADC_BQ_7_12 9
-#define TAC5301_PAGE_DAC_BQ_1_6  16
-#define TAC5301_PAGE_DAC_BQ_7_12 17
+#define TAC5301_PAGE_DAC_BQ_1_6  15
+#define TAC5301_PAGE_DAC_BQ_7_12 16
 
 /* Channel-1 biquad A/B/C: (page, first register). */
 #define TAC5301_ADC_CH1_BQ_A_PAGE TAC5301_PAGE_ADC_BQ_1_6
@@ -125,10 +151,10 @@
 #define TAC5301_ADC_CH1_BQ_C_REG  48  /* filter 9, P9_R48-R67 */
 
 #define TAC5301_DAC_CH1_BQ_A_PAGE TAC5301_PAGE_DAC_BQ_1_6
-#define TAC5301_DAC_CH1_BQ_A_REG  8   /* filter 1, P16_R8-R27 */
+#define TAC5301_DAC_CH1_BQ_A_REG  8   /* filter 1, P15_R8-R27 */
 #define TAC5301_DAC_CH1_BQ_B_PAGE TAC5301_PAGE_DAC_BQ_1_6
-#define TAC5301_DAC_CH1_BQ_B_REG  88  /* filter 5, P16_R88-R107 */
+#define TAC5301_DAC_CH1_BQ_B_REG  88  /* filter 5, P15_R88-R107 */
 #define TAC5301_DAC_CH1_BQ_C_PAGE TAC5301_PAGE_DAC_BQ_7_12
-#define TAC5301_DAC_CH1_BQ_C_REG  48  /* filter 9, P17_R48-R67 */
+#define TAC5301_DAC_CH1_BQ_C_REG  48  /* filter 9, P16_R48-R67 */
 
 #endif /* HAVEN_TAC5301_REGS_H_ */
