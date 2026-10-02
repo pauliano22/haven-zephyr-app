@@ -1,0 +1,13 @@
+# TAC5301-Q1 mono audio codec, I2C control port.
+#
+# Unlike the ADAU1860 binding (analog,adau1860.yaml), this part has no
+# enable/reset pin at all -- confirmed from the datasheet's pin table
+# (SLASFD9A section 4): only power rails, I2C, and the audio serial bus.
+# Bring-up is power-rail sequencing (datasheet section 6.4) plus I2C writes,
+# nothing GPIO-driven.
+
+description: Texas Instruments TAC5301-Q1 mono audio codec (I2C control port)
+
+compatible: "ti,tac5301-q1"
+
+include: i2c-device.yaml
