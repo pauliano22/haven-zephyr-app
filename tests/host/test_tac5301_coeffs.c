@@ -107,6 +107,32 @@ static void test_unity_biquad_matches_reset_value(void)
 	}
 }
 
+/* Cross-check biquad_to_words() against TI's own documented conversion
+ * (SLAAEH6 section 3.2: N0=b0, N1=b1/2, N2=b2, D1=-a1/2, D2=-a2, then
+ * Q1.31), using round numbers chosen so every result is exactly
+ * representable -- no rounding ambiguity in the assertion. This is the
+ * test that would have caught the original bug (which used N0=b0, N1=b1,
+ * N2=b2, D1=a1, D2=a2 -- unnegated and unscaled on N1/D1).
+ */
+static void test_biquad_to_words_matches_ti_app_note_conversion(void)
+{
+	struct tac5301_biquad c = { .b0 = 0.5, .b1 = 0.5, .b2 = 0.125, .a1 = -0.5, .a2 = 0.25 };
+	uint32_t words[TAC5301_BIQUAD_COEFF_COUNT];
+
+	biquad_to_words(&c, words);
+	/* N0 = b0 = 0.5 -> 0.5 * 2^31 = 0x40000000 */
+	CHECK(words[0] == 0x40000000u);
+	/* N1 = b1/2 = 0.25 -> 0x20000000 (NOT b1=0.5 -> 0x40000000, the bug) */
+	CHECK(words[1] == 0x20000000u);
+	/* N2 = b2 = 0.125 -> 0x10000000 (unscaled, unlike N1) */
+	CHECK(words[2] == 0x10000000u);
+	/* D1 = -a1/2 = -(-0.5)/2 = 0.25 -> 0x20000000 (negated AND halved) */
+	CHECK(words[3] == 0x20000000u);
+	/* D2 = -a2 = -0.25 -> two's complement of 0.25*2^31 = 0xE0000000
+	 * (negated, NOT halved -- distinguishes this from D1's treatment) */
+	CHECK(words[4] == 0xE0000000u);
+}
+
 static void test_init_sets_3_biquads_per_channel(void)
 {
 	haven_fake_i2c_reset();
@@ -314,6 +340,7 @@ int main(void)
 	RUN(test_q31_encode_roundtrip);
 	RUN(test_q31_encode_saturates);
 	RUN(test_unity_biquad_matches_reset_value);
+	RUN(test_biquad_to_words_matches_ti_app_note_conversion);
 	RUN(test_init_sets_3_biquads_per_channel);
 	RUN(test_init_enables_only_loopback_mixer);
 	RUN(test_init_powers_up_adc_dac_micbias_together);

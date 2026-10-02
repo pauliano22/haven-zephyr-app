@@ -162,17 +162,36 @@ static const uint32_t unity_biquad_q31[TAC5301_BIQUAD_COEFF_COUNT] = {
 	0x7FFFFFFFu, 0, 0, 0, 0, /* N0=~1.0, N1=N2=D1=D2=0 -- matches the chip's own reset values. */
 };
 
-/* H(z) = (N0 + N1 z^-1 + N2 z^-2) / (1 + D1 z^-1 + D2 z^-2) -- the
- * unnegated textbook form (D1 = a1, D2 = a2 directly); see tac5301_regs.h
- * for why this sign convention is inferred rather than confirmed.
+/* CORRECTED (see fix/tac5301-biquad-coefficient-encoding): the previous
+ * version of this function assumed the unnegated textbook form with no
+ * scaling, which was wrong on 3 of 5 coefficients. TI's own application
+ * note (SLAAEH6, "TAC5x1x and TAC5x1x-Q1 Programmable Biquad Filters -
+ * Configuration and Applications", section 3, Equation 3 and the worked
+ * MATLAB-conversion procedure in section 3.2) gives this exactly:
+ *
+ *   H(z) = (N0 + 2*N1*z^-1 + N2*z^-2) / (2 - 2*D1*z^-1 + D2*z^-2)
+ *
+ * and the conversion from standard RBJ [b0,b1,b2,a1,a2] (a0 normalized to
+ * 1, matching this driver's calc_band_coeffs output):
+ *   N0 = b0
+ *   N1 = b1 / 2   -- NOT b1 directly
+ *   N2 = b2
+ *   D1 = -a1 / 2  -- negated AND halved
+ *   D2 = -a2      -- negated (not halved)
+ * then each converted to Q1.31. Getting this wrong would not have errored
+ * -- it would have produced a filter with roughly the right shape but a
+ * silently wrong center frequency/Q/depth, straight into a device worn in
+ * someone's ear. Caught by reading TI's own app note before any hardware
+ * use, not by a bench measurement -- another reason the bench experiment
+ * (TAC5301_BENCH_EXPERIMENT.md) still matters even after this fix.
  */
 static void biquad_to_words(const struct tac5301_biquad *c, uint32_t out[TAC5301_BIQUAD_COEFF_COUNT])
 {
 	out[0] = q31_encode(c->b0);
-	out[1] = q31_encode(c->b1);
+	out[1] = q31_encode(c->b1 / 2.0);
 	out[2] = q31_encode(c->b2);
-	out[3] = q31_encode(c->a1);
-	out[4] = q31_encode(c->a2);
+	out[3] = q31_encode(-c->a1 / 2.0);
+	out[4] = q31_encode(-c->a2);
 }
 
 /* Write one biquad's 5 coefficients (20 bytes, big-endian per word, per the

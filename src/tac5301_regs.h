@@ -91,22 +91,28 @@
  * Each biquad occupies 20 registers = 5 coefficients (N0, N1, N2, D1, D2) x
  * 4 bytes each, big-endian within each 32-bit coefficient (BYT1 = bits
  * [31:24] first on the wire, per the register map, e.g. 7.2.1's
- * ADC_BQ1_N0_BYT1..BYT4). The transfer function (datasheet Equation 2/4) is
- * H(z) = (N0 + N1 z^-1 + N2 z^-2) / (1 + D1 z^-1 + D2 z^-2) -- note this is
- * the *unnegated* textbook form (D1 = a1, D2 = a2 directly), unlike the
- * ADAU1860's FastDSP convention which stores feedback taps negated. This is
- * inferred from the register naming (N.../D... matching the standard
- * biquad transfer function, not a FastDSP-style "feedback tap" name) and
- * from the reset coefficients only producing a stable all-pass at N0=unity/
- * everything else 0 under this convention -- not an explicit sign-convention
- * statement in the datasheet text. Verify with a real coefficient readback
- * or a bench sweep before trusting this for a safety-relevant filter.
+ * ADC_BQ1_N0_BYT1..BYT4).
  *
- * Coefficient encoding: reset N0 = 0x7FFFFFFF, which is two's-complement
- * Q1.31's closest representable value to +1.0 (2^31 - 1, since Q1.31 cannot
- * represent exactly +1.0) -- a reasonable inference from the reset value,
- * not an explicit "Q1.31" statement in this datasheet. See
- * TAC5301_BENCH_EXPERIMENT.md (haven-dev-board-kicad) for the same caveat.
+ * CORRECTED (an earlier version of this comment guessed an unnegated,
+ * unscaled "textbook" convention -- wrong on 3 of 5 terms). TI's own
+ * application note (SLAAEH6, "TAC5x1x and TAC5x1x-Q1 Programmable Biquad
+ * Filters - Configuration and Applications", section 3) gives the real
+ * transfer function and conversion explicitly, not inferred:
+ *
+ *   H(z) = (N0 + 2*N1*z^-1 + N2*z^-2) / (2 - 2*D1*z^-1 + D2*z^-2)
+ *
+ * Converting from standard RBJ [b0,b1,b2,a1,a2] (a0 normalized to 1):
+ *   N0 = b0, N1 = b1/2, N2 = b2, D1 = -a1/2, D2 = -a2
+ * each then encoded to Q1.31 (multiply by 2^31, round, two's complement --
+ * SLAAEH6 section 3.2 gives a full worked numeric example). Coefficient
+ * encoding is Q1.31 confirmed explicitly by SLAAEH6 section 3 ("With the
+ * Q-point located in the 31st bit location (Q31), the filter coefficients
+ * are in 1.31 format") -- not inferred, as an earlier version of this
+ * comment had it from the reset value alone.
+ *
+ * tac5301_control.c's biquad_to_words() implements this; its own comment
+ * carries the same citation and flags the safety stakes of getting it
+ * wrong (a silently-wrong filter shape, not an error).
  */
 #define TAC5301_BIQUAD_COEFF_COUNT 5 /* N0, N1, N2, D1, D2 */
 #define TAC5301_BIQUAD_REG_COUNT 20  /* 5 coeffs x 4 bytes */
