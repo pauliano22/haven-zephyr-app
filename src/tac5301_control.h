@@ -142,4 +142,34 @@ int tac5301_control_set_mute(bool muted);
 int tac5301_control_set_output_ceiling_db(int ceiling_db);
 int tac5301_control_get_output_ceiling_db(void);
 
+/* ── LDL calibration tone ─────────────────────────────────────────────────
+ * Safety-critical -- see tone_safety.c, which owns validation/clamping and
+ * the auto-stop watchdog, same as for the ADAU1860 path. The tone itself
+ * is synthesised on the nRF5340 (tone_gen.c, codec-agnostic, reused as-is)
+ * and streamed over I2S0 into this chip's ASI; this driver's job is
+ * routing that into the DAC (MIXER_CFG0: ASI mixer on, loopback mixer off,
+ * so the tone plays in isolation rather than mixed with live ambient
+ * sound -- see tac5301_control.c's tone_route_engage() for exactly why
+ * that pairing matters, not just "ASI on") and back out again cleanly
+ * when it stops. NOT the same mechanism as the ADAU1860 driver's DAC_ROUTE0
+ * mux switch or its ASRC-lock wait -- both real architectural differences,
+ * documented at the implementation, not just asserted equivalent here.
+ */
+int tac5301_control_set_tone(float f0_hz, float level_db);
+int tac5301_control_set_tone_level(float level_db);
+int tac5301_control_stop_tone(void);
+
+/* The level mapping above, exposed for tests and the calibration tool,
+ * same contract as adau1860_tone_gain_q15(). */
+int32_t tac5301_tone_gain_q15(float level_db);
+
+/* BLE link lifecycle hooks (main.c). Hearing protection must keep working
+ * with the phone gone, so neither touches the filter state; they log (and
+ * on disconnect, synchronously restore the tone route as a second-layer
+ * safety net -- see tac5301_control.c for why this matters independently
+ * of tone_gen's own feeder-thread callback).
+ */
+void tac5301_control_on_ble_connected(void);
+void tac5301_control_on_ble_disconnected(void);
+
 #endif /* HAVEN_TAC5301_CONTROL_H_ */

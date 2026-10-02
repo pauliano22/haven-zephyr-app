@@ -16,6 +16,7 @@
 #include <math.h>
 #include <string.h>
 
+#include "../../src/tone_gen.c" /* tac5301_control.c's tone functions call into it */
 #include "../../src/tac5301_control.c"
 
 const struct device haven_fake_i2c_bus_dev = { .name = "fake-i2c-tac5301" };
@@ -383,6 +384,135 @@ static void test_ceiling_does_not_apply_while_muted(void)
 	output_ceiling_db = 0;
 }
 
+/* ── Tone-path routing ────────────────────────────────────────────────── */
+
+static void reset_tone_state(void)
+{
+	haven_fake_i2c_reset();
+	haven_fake_i2s_reset();
+	initialised = true;
+	i2s_ready = true;
+	tone_route_engaged = false;
+	muted = false;
+	current_dvol_code = TAC5301_DVOL_UNITY_CODE;
+	atomic_set(&state, TONE_IDLE);
+	run_sem.count = 0;
+}
+
+static void test_set_tone_starts_i2s_then_engages_asi_mixer_disables_loopback(void)
+{
+	reset_tone_state();
+
+	CHECK(tac5301_control_set_tone(4000.0f, 30.0f) == 0);
+
+	/* nRF side armed... */
+	CHECK(atomic_get(&state) == TONE_RUN);
+	CHECK(atomic_get(&target_gain) == tac5301_tone_gain_q15(30.0f));
+
+	/* ...codec side: mute -> MIXER_CFG0 = ASI only (loopback explicitly
+	 * off, not just "ASI also on") -> unmute, in that order. Getting the
+	 * mixer write wrong (e.g. ASI | LOOPBACK instead of ASI alone) would
+	 * mix the tone with live ambient sound -- this is the specific thing
+	 * tone_route_engage()'s header comment flags as the real risk, so the
+	 * test checks the exact byte, not just "a write happened". */
+	CHECK(tone_route_engaged);
+	const struct haven_fake_i2c_xfer *mix = haven_fake_i2c_last_write_page(0, TAC5301_REG_MIXER_CFG0);
+
+	CHECK(mix != NULL && mix->data[0] == TAC5301_MIXER_EN_DAC_ASI_MIXER);
+
+	int seen_mute = -1, seen_route = -1, seen_unmute = -1;
+
+	for (size_t i = 0; i < haven_fake_i2c_log_count; i++) {
+		const struct haven_fake_i2c_xfer *x = &haven_fake_i2c_log[i];
+
+		if (x->reg == TAC5301_REG_DAC_CH1A_DVOL && x->data[0] == TAC5301_DVOL_MUTE_CODE &&
+		    seen_mute < 0) {
+			seen_mute = (int)i;
+		}
+		if (x->reg == TAC5301_REG_MIXER_CFG0) {
+			seen_route = (int)i;
+		}
+		if (x->reg == TAC5301_REG_DAC_CH1A_DVOL && x->data[0] == TAC5301_DVOL_UNITY_CODE) {
+			seen_unmute = (int)i;
+		}
+	}
+	CHECK(seen_mute >= 0 && seen_route > seen_mute && seen_unmute > seen_route);
+
+	/* Filters untouched by the tone: no biquad coefficient writes. */
+	CHECK(haven_fake_i2c_count_writes_page(TAC5301_ADC_CH1_BQ_A_PAGE, TAC5301_ADC_CH1_BQ_A_REG) == 0);
+
+	/* Level update: nRF only, no codec I2C traffic. */
+	size_t before = haven_fake_i2c_log_count;
+
+	CHECK(tac5301_control_set_tone_level(50.0f) == 0);
+	CHECK(atomic_get(&target_gain) == tac5301_tone_gain_q15(50.0f));
+	CHECK(haven_fake_i2c_log_count == before);
+
+	/* Stop: generator told to drain; codec route NOT yet restored (that
+	 * waits for the link to actually go quiet). */
+	CHECK(tac5301_control_stop_tone() == 0);
+	CHECK(atomic_get(&state) == TONE_STOPPING);
+	CHECK(tone_route_engaged);
+	CHECK(haven_fake_i2c_log_count == before);
+
+	/* ...then the feeder's completion callback restores it under mute,
+	 * back to loopback-only (NOT loopback | asi -- the same specific
+	 * mistake would matter in reverse here too). */
+	haven_fake_i2c_reset();
+	on_tone_stopped();
+	CHECK(!tone_route_engaged);
+	mix = haven_fake_i2c_last_write_page(0, TAC5301_REG_MIXER_CFG0);
+	CHECK(mix != NULL && mix->data[0] == TAC5301_MIXER_EN_LOOPBACK_MIXER);
+}
+
+static void test_tone_engage_respects_existing_mute(void)
+{
+	reset_tone_state();
+	muted = true;
+	current_dvol_code = TAC5301_DVOL_UNITY_CODE;
+
+	/* A device that's already user-muted must stay silent through a tone
+	 * start -- the route switch's own "unmute after switching" step must
+	 * write the mute code, not current_dvol_code, or the tone would
+	 * briefly leak out despite the user having muted the device. */
+	CHECK(tac5301_control_set_tone(4000.0f, 30.0f) == 0);
+	CHECK(tone_route_engaged);
+
+	const struct haven_fake_i2c_xfer *last_dvol =
+		haven_fake_i2c_last_write_page(0, TAC5301_REG_DAC_CH1A_DVOL);
+
+	CHECK(last_dvol != NULL && last_dvol->data[0] == TAC5301_DVOL_MUTE_CODE);
+}
+
+static void test_ble_disconnect_restores_route_even_if_engaged(void)
+{
+	reset_tone_state();
+	CHECK(tac5301_control_set_tone(4000.0f, 30.0f) == 0);
+	CHECK(tone_route_engaged);
+	haven_fake_i2c_reset();
+
+	/* Second-layer safety net, independent of tone_gen's own feeder-
+	 * thread callback -- a disconnect must restore the route
+	 * synchronously even if that callback is late or never comes. */
+	tac5301_control_on_ble_disconnected();
+
+	CHECK(!tone_route_engaged);
+	const struct haven_fake_i2c_xfer *mix = haven_fake_i2c_last_write_page(0, TAC5301_REG_MIXER_CFG0);
+
+	CHECK(mix != NULL && mix->data[0] == TAC5301_MIXER_EN_LOOPBACK_MIXER);
+}
+
+static void test_tone_gain_q15_boundary_values(void)
+{
+	CHECK(tac5301_tone_gain_q15(85.0f) == TONE_GEN_GAIN_ONE); /* at full scale */
+	CHECK(tac5301_tone_gain_q15(120.0f) == TONE_GEN_GAIN_ONE); /* clamped, not overflowed */
+	CHECK(tac5301_tone_gain_q15(-20.0f) == 0); /* below the 16-bit floor */
+
+	int32_t at_minus_6db = tac5301_tone_gain_q15(85.0f - 6.0206f);
+
+	CHECK(at_minus_6db > TONE_GEN_GAIN_ONE / 2 - 50 && at_minus_6db < TONE_GEN_GAIN_ONE / 2 + 50);
+}
+
 static void test_mute_uses_dedicated_zero_code_and_restores(void)
 {
 	haven_fake_i2c_reset();
@@ -463,6 +593,10 @@ int main(void)
 	RUN(test_output_ceiling_rejects_out_of_range);
 	RUN(test_lowering_ceiling_immediately_reclamps_current_volume);
 	RUN(test_ceiling_does_not_apply_while_muted);
+	RUN(test_set_tone_starts_i2s_then_engages_asi_mixer_disables_loopback);
+	RUN(test_tone_engage_respects_existing_mute);
+	RUN(test_ble_disconnect_restores_route_even_if_engaged);
+	RUN(test_tone_gain_q15_boundary_values);
 	RUN(test_mute_uses_dedicated_zero_code_and_restores);
 	RUN(test_set_volume_while_muted_does_not_unmute);
 	RUN(test_page_select_only_sent_once_per_page);
