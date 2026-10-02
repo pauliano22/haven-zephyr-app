@@ -42,6 +42,19 @@ static bool initialised;
 static int current_dvol_code = TAC5301_DVOL_UNITY_CODE;
 static bool muted;
 
+/* Hardware output ceiling -- see tac5301_control_set_output_ceiling_db()'s
+ * doc comment in the header for the real architectural difference from
+ * the ADAU1860 driver's equivalent (a genuinely separate, BLE-unreachable
+ * register there; a software-enforced minimum against the single shared
+ * DVOL register here, since this chip has no second gain stage).
+ */
+#ifdef CONFIG_HAVEN_TAC5301_OUTPUT_CEILING_DB
+#define TAC5301_OUTPUT_CEILING_DB_DEFAULT CONFIG_HAVEN_TAC5301_OUTPUT_CEILING_DB
+#else
+#define TAC5301_OUTPUT_CEILING_DB_DEFAULT 0
+#endif
+static int output_ceiling_db = TAC5301_OUTPUT_CEILING_DB_DEFAULT;
+
 /* ── Control-port I/O ────────────────────────────────────────────────────
  * One byte of register address, then the payload, in a single I2C write
  * (datasheet 6.4.1) -- NOT the ADAU1860's 4-byte address scheme. The
@@ -402,6 +415,26 @@ int tac5301_control_set_bypass(bool enabled)
 	return tac5301_control_apply_filters(NULL, 0);
 }
 
+/* dB (DVOL's native range, -100..+27) -> DVOL code (1..255), 0.5dB/step,
+ * per datasheet 7.1.1.73/.75's field description. Shared by
+ * set_volume_pct and the output-ceiling functions so both convert the
+ * same way -- rounding/clamping once, not two slightly-different
+ * formulas that could disagree at an edge value.
+ */
+static int dvol_code_from_db(double db)
+{
+	double code_f = (db + 100.0) * 2.0 + (double)TAC5301_DVOL_MIN_CODE;
+	int code = (int)lround(code_f);
+
+	if (code < TAC5301_DVOL_MIN_CODE) {
+		code = TAC5301_DVOL_MIN_CODE;
+	}
+	if (code > TAC5301_DVOL_MAX_CODE) {
+		code = TAC5301_DVOL_MAX_CODE;
+	}
+	return code;
+}
+
 int tac5301_control_set_volume_pct(uint8_t volume_pct)
 {
 	if (volume_pct > 100) {
@@ -412,15 +445,15 @@ int tac5301_control_set_volume_pct(uint8_t volume_pct)
 	 * volume_pct mapping, codec-specific numbers. */
 	double frac = (double)volume_pct / 100.0;
 	double db = -100.0 + frac * 100.0; /* linear in dB, 0% = -100dB .. 100% = 0dB */
-	double code_f = (db + 100.0) * 2.0 + (double)TAC5301_DVOL_MIN_CODE; /* 0.5dB/step */
+	int code = dvol_code_from_db(db);
 
-	int code = (int)lround(code_f);
+	/* Enforce the ceiling here, at the single point this driver has for
+	 * it -- see the header comment on why this chip needs a software
+	 * clamp instead of a genuinely separate hardware stage. */
+	int ceiling_code = dvol_code_from_db((double)output_ceiling_db);
 
-	if (code < TAC5301_DVOL_MIN_CODE) {
-		code = TAC5301_DVOL_MIN_CODE;
-	}
-	if (code > TAC5301_DVOL_UNITY_CODE) {
-		code = TAC5301_DVOL_UNITY_CODE;
+	if (code > ceiling_code) {
+		code = ceiling_code;
 	}
 	current_dvol_code = code;
 	if (muted) {
@@ -433,4 +466,34 @@ int tac5301_control_set_mute(bool enable_mute)
 {
 	muted = enable_mute;
 	return write_dac_dvol(muted ? TAC5301_DVOL_MUTE_CODE : (uint8_t)current_dvol_code);
+}
+
+int tac5301_control_set_output_ceiling_db(int ceiling_db)
+{
+	if (ceiling_db > 27 || ceiling_db < -100) {
+		return -EINVAL;
+	}
+	output_ceiling_db = ceiling_db;
+
+	int ceiling_code = dvol_code_from_db((double)ceiling_db);
+
+	/* Re-clamp whatever's currently active, same as the ADAU1860 driver's
+	 * equivalent taking effect immediately rather than waiting for the
+	 * next explicit set_volume_pct call -- except there, lowering the
+	 * ceiling can't be bypassed by anything else touching the volume,
+	 * because it's a separate register; here, current_dvol_code IS the
+	 * single value both paths share, so clamping it here is what makes
+	 * the two behave the same way from the caller's point of view. */
+	if (current_dvol_code > ceiling_code) {
+		current_dvol_code = ceiling_code;
+	}
+	if (muted || !initialised) {
+		return 0;
+	}
+	return write_dac_dvol((uint8_t)current_dvol_code);
+}
+
+int tac5301_control_get_output_ceiling_db(void)
+{
+	return output_ceiling_db;
 }

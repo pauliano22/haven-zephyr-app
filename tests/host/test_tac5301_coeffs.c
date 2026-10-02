@@ -301,6 +301,88 @@ static void test_volume_pct_100_is_unity_code(void)
 	CHECK(a != NULL && a->data[0] == TAC5301_DVOL_UNITY_CODE);
 }
 
+static void test_output_ceiling_clamps_volume_pct(void)
+{
+	haven_fake_i2c_reset();
+	initialised = false;
+	tac5301_control_init();
+	muted = false;
+	output_ceiling_db = 0;
+
+	int err = tac5301_control_set_output_ceiling_db(-20);
+
+	CHECK(err == 0);
+	haven_fake_i2c_reset();
+
+	/* Ask for 100% (0dB) -- should be clamped to the -20dB ceiling, not
+	 * the chip's own 0dB unity code. This is the single-shared-register
+	 * software clamp the header comment describes, not a separate stage. */
+	tac5301_control_set_volume_pct(100);
+	const struct haven_fake_i2c_xfer *a = haven_fake_i2c_last_write_page(0, TAC5301_REG_DAC_CH1A_DVOL);
+	int expected_code = (int)lround((-20.0 + 100.0) * 2.0 + (double)TAC5301_DVOL_MIN_CODE);
+
+	CHECK(a != NULL && a->data[0] == (uint8_t)expected_code);
+	CHECK(a != NULL && a->data[0] != TAC5301_DVOL_UNITY_CODE);
+
+	output_ceiling_db = 0; /* don't leak into later tests */
+}
+
+static void test_output_ceiling_rejects_out_of_range(void)
+{
+	output_ceiling_db = 0;
+	int err_high = tac5301_control_set_output_ceiling_db(28); /* max is +27 */
+	int err_low = tac5301_control_set_output_ceiling_db(-101); /* min is -100 */
+
+	CHECK(err_high == -EINVAL);
+	CHECK(err_low == -EINVAL);
+	CHECK(output_ceiling_db == 0); /* rejected calls must not change state */
+}
+
+static void test_lowering_ceiling_immediately_reclamps_current_volume(void)
+{
+	haven_fake_i2c_reset();
+	initialised = false;
+	tac5301_control_init();
+	muted = false;
+	output_ceiling_db = 0;
+
+	tac5301_control_set_volume_pct(100); /* 0dB, well above the ceiling about to be set */
+	haven_fake_i2c_reset();
+
+	/* Lowering the ceiling alone (no new set_volume_pct call) must write
+	 * the new, lower value immediately -- mirroring the ADAU1860 driver's
+	 * "takes effect immediately" behavior, which matters because the app
+	 * protocol can change the ceiling independently of the user touching
+	 * volume at all. */
+	tac5301_control_set_output_ceiling_db(-50);
+	const struct haven_fake_i2c_xfer *a = haven_fake_i2c_last_write_page(0, TAC5301_REG_DAC_CH1A_DVOL);
+	int expected_code = (int)lround((-50.0 + 100.0) * 2.0 + (double)TAC5301_DVOL_MIN_CODE);
+
+	CHECK(a != NULL && a->data[0] == (uint8_t)expected_code);
+
+	output_ceiling_db = 0;
+}
+
+static void test_ceiling_does_not_apply_while_muted(void)
+{
+	haven_fake_i2c_reset();
+	initialised = false;
+	tac5301_control_init();
+	muted = false;
+	output_ceiling_db = 0;
+	tac5301_control_set_mute(true);
+	haven_fake_i2c_reset();
+
+	/* Lowering the ceiling while muted must not un-mute the device by
+	 * writing a non-zero code -- the dedicated mute code stays in place. */
+	int err = tac5301_control_set_output_ceiling_db(-30);
+
+	CHECK(err == 0);
+	CHECK(haven_fake_i2c_count_writes_page(0, TAC5301_REG_DAC_CH1A_DVOL) == 0);
+
+	output_ceiling_db = 0;
+}
+
 static void test_mute_uses_dedicated_zero_code_and_restores(void)
 {
 	haven_fake_i2c_reset();
@@ -377,6 +459,10 @@ int main(void)
 	RUN(test_set_bypass_true_calls_apply_filters_empty);
 	RUN(test_volume_pct_0_is_min_code);
 	RUN(test_volume_pct_100_is_unity_code);
+	RUN(test_output_ceiling_clamps_volume_pct);
+	RUN(test_output_ceiling_rejects_out_of_range);
+	RUN(test_lowering_ceiling_immediately_reclamps_current_volume);
+	RUN(test_ceiling_does_not_apply_while_muted);
 	RUN(test_mute_uses_dedicated_zero_code_and_restores);
 	RUN(test_set_volume_while_muted_does_not_unmute);
 	RUN(test_page_select_only_sent_once_per_page);
