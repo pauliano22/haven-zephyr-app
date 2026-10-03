@@ -239,6 +239,93 @@ static void test_apply_filters_splits_adc_then_dac(void)
 	CHECK(n0 == 0x7FFFFFFFu);
 }
 
+/* The ADC/DAC split boundary (count == 3) was never exercised directly --
+ * test_apply_filters_splits_adc_then_dac only covers 5 (both sides
+ * partially real) and zero (all unity). At exactly 3, the DAC side must
+ * be ALL unity, not just "slot C" -- a split-index off-by-one bug could
+ * leak a real band into DAC slot A/B here without either existing test
+ * catching it.
+ */
+static void test_apply_filters_exactly_3_bands_leaves_dac_all_unity(void)
+{
+	struct filter_band bands[3] = {
+		{ .f0_hz = 1000.0f, .q = 5.0f, .atten_db = PROTOCOL_ATTEN_MAX_DB },
+		{ .f0_hz = 2000.0f, .q = 5.0f, .atten_db = PROTOCOL_ATTEN_MAX_DB },
+		{ .f0_hz = 3000.0f, .q = 5.0f, .atten_db = PROTOCOL_ATTEN_MAX_DB },
+	};
+
+	haven_fake_i2c_reset();
+	initialised = false;
+	tac5301_control_init();
+	haven_fake_i2c_reset();
+
+	int err = tac5301_control_apply_filters(bands, 3);
+
+	CHECK(err == 0);
+
+	struct {
+		uint8_t page;
+		uint8_t reg;
+	} dac_slots[3] = {
+		{ TAC5301_DAC_CH1_BQ_A_PAGE, TAC5301_DAC_CH1_BQ_A_REG },
+		{ TAC5301_DAC_CH1_BQ_B_PAGE, TAC5301_DAC_CH1_BQ_B_REG },
+		{ TAC5301_DAC_CH1_BQ_C_PAGE, TAC5301_DAC_CH1_BQ_C_REG },
+	};
+
+	for (int i = 0; i < 3; i++) {
+		const struct haven_fake_i2c_xfer *w =
+			haven_fake_i2c_last_write_page(dac_slots[i].page, dac_slots[i].reg);
+
+		CHECK(w != NULL && w->len == TAC5301_BIQUAD_REG_COUNT);
+		CHECK(w != NULL && sys_get_be32(w->data) == 0x7FFFFFFFu);
+	}
+
+	/* And all 3 ADC slots must carry the real bands, not unity. */
+	struct {
+		uint8_t page;
+		uint8_t reg;
+	} adc_slots[3] = {
+		{ TAC5301_ADC_CH1_BQ_A_PAGE, TAC5301_ADC_CH1_BQ_A_REG },
+		{ TAC5301_ADC_CH1_BQ_B_PAGE, TAC5301_ADC_CH1_BQ_B_REG },
+		{ TAC5301_ADC_CH1_BQ_C_PAGE, TAC5301_ADC_CH1_BQ_C_REG },
+	};
+
+	for (int i = 0; i < 3; i++) {
+		const struct haven_fake_i2c_xfer *w =
+			haven_fake_i2c_last_write_page(adc_slots[i].page, adc_slots[i].reg);
+
+		CHECK(w != NULL && sys_get_be32(w->data) != 0x7FFFFFFFu);
+	}
+}
+
+/* count > PROTOCOL_MAX_BANDS (5) must clamp, not read past the caller's
+ * array -- this is the one path that could be a real out-of-bounds read
+ * if the clamp were ever removed or miscompared.
+ */
+static void test_apply_filters_clamps_count_above_max_bands(void)
+{
+	struct filter_band bands[5] = {
+		{ .f0_hz = 1000.0f, .q = 5.0f, .atten_db = PROTOCOL_ATTEN_MAX_DB },
+		{ .f0_hz = 2000.0f, .q = 5.0f, .atten_db = PROTOCOL_ATTEN_MAX_DB },
+		{ .f0_hz = 3000.0f, .q = 5.0f, .atten_db = PROTOCOL_ATTEN_MAX_DB },
+		{ .f0_hz = 4000.0f, .q = 5.0f, .atten_db = PROTOCOL_ATTEN_MAX_DB },
+		{ .f0_hz = 5000.0f, .q = 5.0f, .atten_db = PROTOCOL_ATTEN_MAX_DB },
+	};
+
+	haven_fake_i2c_reset();
+	initialised = false;
+	tac5301_control_init();
+	haven_fake_i2c_reset();
+
+	/* Claim 200 bands over a real 5-element array -- if the clamp to
+	 * PROTOCOL_MAX_BANDS is ever removed, this reads past the array
+	 * (ASan/valgrind territory) instead of just computing a wrong value,
+	 * so this test is as much a memory-safety check as a behavior one. */
+	int err = tac5301_control_apply_filters(bands, 200);
+
+	CHECK(err == 0);
+}
+
 static void test_apply_filters_zero_bands_is_all_unity(void)
 {
 	haven_fake_i2c_reset();
@@ -585,6 +672,8 @@ int main(void)
 	RUN(test_init_enables_only_loopback_mixer);
 	RUN(test_init_powers_up_adc_dac_micbias_together);
 	RUN(test_apply_filters_splits_adc_then_dac);
+	RUN(test_apply_filters_exactly_3_bands_leaves_dac_all_unity);
+	RUN(test_apply_filters_clamps_count_above_max_bands);
 	RUN(test_apply_filters_zero_bands_is_all_unity);
 	RUN(test_set_bypass_true_calls_apply_filters_empty);
 	RUN(test_volume_pct_0_is_min_code);
