@@ -16,8 +16,49 @@ apply_over_ble.py.
 from typing import Iterator, List, NamedTuple, Optional
 
 import numpy as np
+from scipy import signal
 
 from analyze import find_troublesome_band
+
+# Gates added after review of PR #16 (2026-09-29): find_troublesome_band()
+# always returns *some* argmax, so without these a window of digital
+# silence yielded a "band" at the lowest search bin and white noise yielded
+# a different random "band" every window -- and --rolling would have written
+# either to the FreqRange characteristic. A problem tone has to stand out
+# from the rest of the spectrum (prominence) and the window has to contain
+# real signal (level) before it counts.
+DEFAULT_MIN_PROMINENCE_DB = 10.0
+DEFAULT_MIN_LEVEL_DBFS = -60.0
+
+
+def window_level_dbfs(chunk: np.ndarray) -> float:
+    """RMS level of the window in dBFS (0 dBFS = full-scale sine RMS 1/sqrt2
+    is -3 dBFS; a full-scale square wave is 0 dBFS). -inf for digital
+    silence."""
+    rms = float(np.sqrt(np.mean(np.square(chunk.astype(np.float64))))) if len(chunk) else 0.0
+    return 20.0 * np.log10(rms) if rms > 0 else float("-inf")
+
+
+def peak_prominence_db(chunk: np.ndarray, sample_rate: int, peak_hz: float,
+                       search_min_hz: float = 20.0, search_max_hz: Optional[float] = None) -> float:
+    """How far the PSD at peak_hz stands above the *median* PSD of the
+    searched band, in dB. White noise gives ~0-6 dB (argmax of a flat
+    spectrum is just the luckiest bin); a real tone gives tens of dB.
+    Uses the same Welch settings as find_troublesome_band so the peak bin
+    is the same bin."""
+    if search_max_hz is None:
+        search_max_hz = sample_rate / 2.0
+    freqs, psd = signal.welch(chunk, fs=sample_rate, nperseg=min(4096, len(chunk)))
+    mask = (freqs >= search_min_hz) & (freqs <= search_max_hz)
+    freqs = freqs[mask]
+    psd = psd[mask]
+    if len(psd) == 0:
+        return 0.0
+    idx = int(np.argmin(np.abs(freqs - peak_hz)))
+    floor = float(np.median(psd))
+    if floor <= 0.0:
+        return float("inf") if psd[idx] > 0 else 0.0
+    return 10.0 * float(np.log10(psd[idx] / floor))
 
 
 class WindowResult(NamedTuple):
@@ -54,6 +95,8 @@ def rolling_analyze(
     sample_rate: int,
     window_s: float = 2.0,
     hop_s: float = 1.0,
+    min_prominence_db: float = DEFAULT_MIN_PROMINENCE_DB,
+    min_level_dbfs: float = DEFAULT_MIN_LEVEL_DBFS,
     **find_kwargs,
 ) -> Iterator[WindowResult]:
     """Slide a window_s-second window across `samples` in hop_s-second
@@ -62,6 +105,15 @@ def rolling_analyze(
     that's pure silence outside the search range) is skipped, not raised --
     a rolling scan over a long recording shouldn't abort on one quiet
     window.
+
+    Two gates decide whether a window's argmax is a *tone* at all:
+    - level: windows quieter than min_level_dbfs RMS are skipped (digital
+      silence, mic unplugged, pauses);
+    - prominence: the peak must stand min_prominence_db above the median
+      PSD of the searched band (white/pink noise, HVAC rumble spread over
+      the spectrum, speech babble do not qualify).
+    Pass min_prominence_db=0 and min_level_dbfs=-inf to get the ungated
+    PR #16 behaviour back.
     """
     if window_s <= 0 or hop_s <= 0:
         raise ValueError("window_s and hop_s must be positive")
@@ -73,10 +125,20 @@ def rolling_analyze(
 
     for start in range(0, len(samples) - window_n + 1, hop_n):
         chunk = samples[start : start + window_n]
+        if window_level_dbfs(chunk) < min_level_dbfs:
+            continue
         try:
             peak_hz, lower_hz, upper_hz = find_troublesome_band(chunk, sample_rate, **find_kwargs)
         except ValueError:
             continue
+        if min_prominence_db > 0:
+            prom = peak_prominence_db(
+                chunk, sample_rate, peak_hz,
+                search_min_hz=find_kwargs.get("search_min_hz", 20.0),
+                search_max_hz=find_kwargs.get("search_max_hz"),
+            )
+            if prom < min_prominence_db:
+                continue
         yield WindowResult(start / sample_rate, peak_hz, lower_hz, upper_hz)
 
 
@@ -85,6 +147,8 @@ def find_sustained_bands(
     window_s: float,
     freq_tolerance_hz: float = 200.0,
     min_duration_s: float = 2.0,
+    min_windows: int = 2,
+    max_gap_s: Optional[float] = None,
 ) -> List[SustainedBand]:
     """Group consecutive windows whose peak stays within freq_tolerance_hz
     of the group's running mean, and keep only groups that span at least
@@ -113,12 +177,17 @@ def find_sustained_bands(
     """
     if not windows:
         return []
+    if max_gap_s is None:
+        max_gap_s = window_s  # consecutive hops overlap; a gap longer than one
+        # window means at least one window in between was skipped (gated out),
+        # so the tone was not actually continuous across it.
 
     groups: List[List[WindowResult]] = [[windows[0]]]
     for w in windows[1:]:
         current = groups[-1]
         running_mean = sum(x.peak_hz for x in current) / len(current)
-        if abs(w.peak_hz - running_mean) <= freq_tolerance_hz:
+        gap_s = w.start_s - current[-1].start_s
+        if abs(w.peak_hz - running_mean) <= freq_tolerance_hz and gap_s <= max_gap_s:
             current.append(w)
         else:
             groups.append([w])
@@ -127,14 +196,18 @@ def find_sustained_bands(
     for group in groups:
         start_s = group[0].start_s
         duration_s = (group[-1].start_s - group[0].start_s) + window_s
-        if duration_s >= min_duration_s:
+        # min_windows: with the default min_duration_s == window_s, every single
+        # window used to count as "sustained" by itself (duration_s == window_s
+        # >= min_duration_s), which defeats the function's stated purpose. A
+        # sustained tone has to survive at least min_windows consecutive looks.
+        if duration_s >= min_duration_s and len(group) >= min_windows:
             mean_peak = sum(x.peak_hz for x in group) / len(group)
             mean_lower = sum(x.lower_hz for x in group) / len(group)
             mean_upper = sum(x.upper_hz for x in group) / len(group)
             sustained.append(
                 SustainedBand(
                     start_s=start_s,
-                    end_s=group[-1].start_s,
+                    end_s=group[-1].start_s + window_s,  # end of the last window, so end_s - start_s == duration_s
                     duration_s=duration_s,
                     mean_peak_hz=mean_peak,
                     mean_lower_hz=mean_lower,
