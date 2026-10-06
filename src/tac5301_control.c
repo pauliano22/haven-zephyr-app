@@ -467,12 +467,56 @@ int tac5301_control_init(void)
 	return 0;
 }
 
+/* Datasheet SLASFD9A §6.3.7.1.5 (ADC) and §6.3.7.2 (DAC): "the host device
+ * must write these coefficient values before powering up any ADC channels
+ * for recording or DAC channels for playback. In two channel use case, the
+ * TAC5301-Q1 also supports on the fly programmable filters" (two banks +
+ * a switch bit). Haven runs the mono, single-bank configuration, so a live
+ * rewrite is outside the documented behaviour -- and even where the silicon
+ * tolerates it, six biquads x five 32-bit words land one register at a
+ * time, so the filter passes through dozens of half-updated coefficient
+ * sets (unstable ones included) while audio is flowing. There is no
+ * safeload here (that is the ADAU1860's feature). The documented-correct
+ * sequence is therefore: mute the DAC, power down ADC+DAC (MICBIAS stays
+ * up so the electret bias does not have to re-settle), write every slot,
+ * power ADC+DAC back up, restore the volume. This costs an audible dropout
+ * per update; that is a property of the part, not of this driver, and is
+ * one of the reasons the research track is a research track.
+ */
+static int coeff_update_begin(void)
+{
+	int err = write_dac_dvol(TAC5301_DVOL_MUTE_CODE);
+
+	if (err) {
+		return err;
+	}
+	return reg_write8(TAC5301_REG_PWR_CFG, TAC5301_PWR_MICBIAS_PDZ);
+}
+
+static int coeff_update_end(void)
+{
+	int err = reg_write8(TAC5301_REG_PWR_CFG,
+			     TAC5301_PWR_ADC_PDZ | TAC5301_PWR_DAC_PDZ | TAC5301_PWR_MICBIAS_PDZ);
+
+	if (err) {
+		return err;
+	}
+	return write_dac_dvol_effective();
+}
+
 int tac5301_control_apply_filters(const struct filter_band *bands, size_t count)
 {
 	int err = 0;
 
 	if (count > PROTOCOL_MAX_BANDS) {
 		count = PROTOCOL_MAX_BANDS;
+	}
+
+	if (initialised) {
+		err = coeff_update_begin();
+		if (err) {
+			return err;
+		}
 	}
 
 	/* ADC chain gets the first up-to-3 bands, DAC chain gets the rest
@@ -526,6 +570,16 @@ int tac5301_control_apply_filters(const struct filter_band *bands, size_t count)
 			continue;
 		}
 		int e = write_dac_slot(slot, words);
+
+		if (e && !err) {
+			err = e;
+		}
+	}
+
+	if (initialised) {
+		/* Always bring the chains back up, even after a failed slot write:
+		 * a silent codec is a worse failure than a stale band. */
+		int e = coeff_update_end();
 
 		if (e && !err) {
 			err = e;
