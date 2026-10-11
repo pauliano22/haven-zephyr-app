@@ -1,0 +1,96 @@
+/*
+ * nRF5340 DK bench wiring for a TAC5301-Q1 (breadboard, chip hand-soldered
+ * to a QFN-24 0.5mm adapter board) — application core.
+ *
+ * Control port : I2C1 (Arduino-header SDA/SCL on the DK; TAC5301 at 0x50 --
+ *                datasheet SLASFD9A §6.4.1, "the 7-bit I2C target address
+ *                is fixed to 7'b1010000"). No enable/reset pin to drive,
+ *                unlike the ADAU1860 overlay's P1.04 -- confirmed from this
+ *                driver's own binding note (dts/bindings/ti,tac5301-q1.yaml):
+ *                the part's only pins are power rails, I2C, and the audio
+ *                serial bus.
+ * Audio data   : I2S0, nRF5340 as MASTER -- same 4 pins as the default
+ *                nrf5340dk overlay's ADAU1860 bench (Arduino D4-D7 /
+ *                gpio1 6-9), so both bench setups share identical physical
+ *                wiring and only the chip on the breadboard changes.
+ *                tone_gen.c's calibration tone still goes out on SDOUT, but
+ *                the TAC5301 ignores it for this test: MIXER_CFG0's
+ *                EN_DAC_ASI_MIXER bit is left at its reset default 0 (see
+ *                TAC5301_BENCH_EXPERIMENT.md register-write step 4), so the
+ *                DAC hears only the chip's internal ADC -> loopback-mixer ->
+ *                DAC path. BCLK/FSYNC still have to toggle continuously --
+ *                that's the only reason I2S needs to be live at all here --
+ *                for the TAC5301's PLL to lock onto them (datasheet §6.3.2:
+ *                every internal clock auto-configures off the BCLK/FSYNC
+ *                ratio, no MCLK pin on this part).
+ *
+ * This DK is only a bench for the codec's control plane, same role as the
+ * default overlay's ADAU1860 bench. Build with:
+ *
+ *   west build -b nrf5340dk/nrf5340/cpuapp --sysbuild haven_zephyr_app -- \
+ *     -DBOARD_ROOT="$(pwd)" \
+ *     -DEXTRA_DTC_OVERLAY_FILE=boards/nrf5340dk_nrf5340_cpuapp_tac5301.overlay \
+ *     -DCONFIG_HAVEN_CODEC_TAC5301=y
+ *
+ * (EXTRA_DTC_OVERLAY_FILE layers on top of the board's own default overlay,
+ * nrf5340dk_nrf5340_cpuapp.overlay -- it does not replace it. The
+ * /delete-node/ below removes that file's adau1860@64 child before this one
+ * adds tac5301@50 in its place; the i2c1 bus node, i2s0 pinctrl, i2s0, and
+ * clock nodes below re-specify the same properties the default overlay
+ * already sets, which devicetree overlays merge rather than conflict on, so
+ * restating them here is just for this file to read standalone.)
+ *
+ * Bench power rails (see TAC5301_BENCH_EXPERIMENT.md): IOVDD/AVDD/DVDD
+ * (1.8V/3.3V) can come straight off the DK's own external-supply pin
+ * (P20 pin 2, SW9=VDD / SW10=OFF, 1.7-3.6V range, <=100mA -- confirmed
+ * against Nordic's nRF5340 DK v2.0.0 hardware guide, "Supplying a custom
+ * board" section) instead of a separate bench supply. HVDD (the mic-bias
+ * rail, ~9V) is the one rail the DK genuinely cannot produce -- needs a
+ * separate 9V source (a 9V battery is fine for a bench test).
+ */
+
+&i2c1 {
+	status = "okay";
+	clock-frequency = <I2C_BITRATE_FAST>;
+
+	/delete-node/ adau1860@64;
+
+	tac5301: tac5301@50 {
+		compatible = "ti,tac5301-q1";
+		reg = <0x50>;
+		status = "okay";
+	};
+};
+
+&pinctrl {
+	i2s0_default: i2s0_default {
+		group1 {
+			psels = <NRF_PSEL(I2S_SCK_M, 1, 6)>,
+				<NRF_PSEL(I2S_LRCK_M, 1, 7)>,
+				<NRF_PSEL(I2S_SDOUT, 1, 8)>,
+				<NRF_PSEL(I2S_SDIN, 1, 9)>;
+		};
+	};
+
+	i2s0_sleep: i2s0_sleep {
+		group1 {
+			psels = <NRF_PSEL(I2S_SCK_M, 1, 6)>,
+				<NRF_PSEL(I2S_LRCK_M, 1, 7)>,
+				<NRF_PSEL(I2S_SDOUT, 1, 8)>,
+				<NRF_PSEL(I2S_SDIN, 1, 9)>;
+			low-power-enable;
+		};
+	};
+};
+
+&i2s0 {
+	status = "okay";
+	pinctrl-0 = <&i2s0_default>;
+	pinctrl-1 = <&i2s0_sleep>;
+	pinctrl-names = "default", "sleep";
+	clock-source = "ACLK";
+};
+
+&clock {
+	hfclkaudio-frequency = <12288000>;
+};
