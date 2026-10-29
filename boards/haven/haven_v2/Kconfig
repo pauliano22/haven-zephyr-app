@@ -1,0 +1,15 @@
+if BOARD_HAVEN_V2_NRF5340_CPUAPP
+
+config DOMAIN_CPUNET_BOARD
+	string
+	default "haven_v2/nrf5340/cpunet"
+
+endif # BOARD_HAVEN_V2_NRF5340_CPUAPP
+
+if BOARD_HAVEN_V2_NRF5340_CPUNET
+
+config DOMAIN_CPUAPP_BOARD
+	string
+	default "haven_v2/nrf5340/cpuapp"
+
+endif # BOARD_HAVEN_V2_NRF5340_CPUNET

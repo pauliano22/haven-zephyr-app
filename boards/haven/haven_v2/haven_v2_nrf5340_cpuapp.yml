@@ -1,0 +1,15 @@
+identifier: haven_v2/nrf5340/cpuapp
+name: Haven v2 earbud (application core)
+vendor: haven
+type: mcu
+arch: arm
+ram: 448
+flash: 1024
+toolchain:
+  - zephyr
+supported:
+  - adc
+  - gpio
+  - i2c
+  - i2s
+sysbuild: true

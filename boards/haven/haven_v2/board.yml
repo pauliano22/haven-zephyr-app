@@ -1,0 +1,6 @@
+board:
+  name: haven_v2
+  full_name: Haven v2 earbud
+  vendor: haven
+  socs:
+  - name: nrf5340

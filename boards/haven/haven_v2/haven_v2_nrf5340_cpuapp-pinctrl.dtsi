@@ -1,0 +1,44 @@
+/*
+ * Haven v2 pin map, from the v2 schematic (haven-dev-board-kicad, kicad_v2/README.md,
+ * "nRF5340 pin map vs v1"). The MDBT53V-1M brings out only 25 GPIOs, so the codec bus and
+ * I2S moved off v1's pins.
+ */
+&pinctrl {
+	/* nRF5340 is I2S master. SDOUT P0.15 -> codec SDATAI_0 (net DIN),
+	 * SDIN P0.31 <- codec SDATAO_0 (net DOUT). No MCK: the codec runs from its own crystal. */
+	i2s0_default: i2s0_default {
+		group1 {
+			psels = <NRF_PSEL(I2S_SCK_M, 0, 13)>,
+				<NRF_PSEL(I2S_LRCK_M, 0, 14)>,
+				<NRF_PSEL(I2S_SDOUT, 0, 15)>,
+				<NRF_PSEL(I2S_SDIN, 0, 31)>;
+		};
+	};
+
+	i2s0_sleep: i2s0_sleep {
+		group1 {
+			psels = <NRF_PSEL(I2S_SCK_M, 0, 13)>,
+				<NRF_PSEL(I2S_LRCK_M, 0, 14)>,
+				<NRF_PSEL(I2S_SDOUT, 0, 15)>,
+				<NRF_PSEL(I2S_SDIN, 0, 31)>;
+			low-power-enable;
+		};
+	};
+
+	/* Codec control port. P1.02/P1.03 are also the nRF5340's dedicated
+	 * pins for 1 Mbit/s TWIM, so this bus can go faster later. */
+	i2c1_default: i2c1_default {
+		group1 {
+			psels = <NRF_PSEL(TWIM_SCL, 1, 3)>,
+				<NRF_PSEL(TWIM_SDA, 1, 2)>;
+		};
+	};
+
+	i2c1_sleep: i2c1_sleep {
+		group1 {
+			psels = <NRF_PSEL(TWIM_SCL, 1, 3)>,
+				<NRF_PSEL(TWIM_SDA, 1, 2)>;
+			low-power-enable;
+		};
+	};
+};
