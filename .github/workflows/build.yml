@@ -45,6 +45,10 @@ jobs:
           - board: openearable_v2/nrf5340/cpuapp
             name: openearable_v2-routeB
             extra: -DEXTRA_CONF_FILE=routeB.conf
+          # v2 earbud: MDBT53V-1M + nPM1100, charged through case pogo pins
+          # (boards/haven/haven_v2; pin map from haven-dev-board-kicad kicad_v2/).
+          - board: haven_v2/nrf5340/cpuapp
+            name: haven_v2
           # LFRC fallback build (README "LFRC fallback"): same DK target with
           # -DFILE_SUFFIX=lfrc, which pulls in boards/*_lfrc.conf on the app
           # core and sysbuild/ipc_radio_lfrc.conf on the net core. The
