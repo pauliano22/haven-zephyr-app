@@ -239,6 +239,86 @@ static void test_apply_filters_splits_adc_then_dac(void)
 	CHECK(n0 == 0x7FFFFFFFu);
 }
 
+/* SLASFD9A §6.3.7.1.5 / §6.3.7.2: coefficients are written with the ADC/DAC
+ * channels powered down (mono, single-bank configuration). Check the order
+ * on the fake bus: DAC mute, PWR_CFG without ADC/DAC, all six slots,
+ * PWR_CFG with ADC/DAC, volume restored. */
+static size_t first_index_page(uint8_t page, uint8_t reg)
+{
+	for (size_t i = 0; i < haven_fake_i2c_log_count; i++) {
+		if (haven_fake_i2c_log_page[i] == page && haven_fake_i2c_log[i].reg == reg) {
+			return i;
+		}
+	}
+	return (size_t)-1;
+}
+
+static size_t last_index_page(uint8_t page, uint8_t reg)
+{
+	for (size_t i = haven_fake_i2c_log_count; i > 0; i--) {
+		if (haven_fake_i2c_log_page[i - 1] == page && haven_fake_i2c_log[i - 1].reg == reg) {
+			return i - 1;
+		}
+	}
+	return (size_t)-1;
+}
+
+static void test_apply_filters_writes_coefficients_with_adc_dac_powered_down(void)
+{
+	struct filter_band bands[2] = {
+		{ .f0_hz = 1000.0f, .q = 5.0f, .atten_db = PROTOCOL_ATTEN_MAX_DB },
+		{ .f0_hz = 4000.0f, .q = 5.0f, .atten_db = PROTOCOL_ATTEN_MAX_DB },
+	};
+
+	haven_fake_i2c_reset();
+	initialised = false;
+	tac5301_control_init();
+	haven_fake_i2c_reset();
+
+	CHECK(tac5301_control_apply_filters(bands, 2) == 0);
+
+	size_t mute = first_index_page(0, TAC5301_REG_DAC_CH1A_DVOL);
+	size_t pwr_down = first_index_page(0, TAC5301_REG_PWR_CFG);
+	size_t first_bq = first_index_page(TAC5301_ADC_CH1_BQ_A_PAGE, TAC5301_ADC_CH1_BQ_A_REG);
+	size_t last_bq = last_index_page(TAC5301_DAC_CH1_BQ_C_PAGE, TAC5301_DAC_CH1_BQ_C_REG);
+	size_t pwr_up = last_index_page(0, TAC5301_REG_PWR_CFG);
+	size_t restore = last_index_page(0, TAC5301_REG_DAC_CH1B_DVOL);
+
+	CHECK(mute != (size_t)-1 && pwr_down != (size_t)-1 && first_bq != (size_t)-1);
+	CHECK(last_bq != (size_t)-1 && pwr_up != (size_t)-1 && restore != (size_t)-1);
+	CHECK(haven_fake_i2c_count_writes_page(0, TAC5301_REG_PWR_CFG) == 2);
+
+	/* order */
+	CHECK(mute < pwr_down && pwr_down < first_bq && first_bq <= last_bq);
+	CHECK(last_bq < pwr_up && pwr_up < restore);
+
+	/* values */
+	CHECK(haven_fake_i2c_log[mute].data[0] == TAC5301_DVOL_MUTE_CODE);
+	CHECK(haven_fake_i2c_log[pwr_down].data[0] == TAC5301_PWR_MICBIAS_PDZ);
+	CHECK(haven_fake_i2c_log[pwr_up].data[0] ==
+	      (TAC5301_PWR_ADC_PDZ | TAC5301_PWR_DAC_PDZ | TAC5301_PWR_MICBIAS_PDZ));
+	CHECK(haven_fake_i2c_log[restore].data[0] == TAC5301_DVOL_UNITY_CODE);
+}
+
+static void test_apply_filters_restores_mute_state_not_volume_when_muted(void)
+{
+	struct filter_band bands[1] = { { .f0_hz = 1000.0f, .q = 5.0f, .atten_db = PROTOCOL_ATTEN_MAX_DB } };
+
+	haven_fake_i2c_reset();
+	initialised = false;
+	tac5301_control_init();
+	CHECK(tac5301_control_set_mute(true) == 0);
+	haven_fake_i2c_reset();
+
+	CHECK(tac5301_control_apply_filters(bands, 1) == 0);
+
+	size_t restore = last_index_page(0, TAC5301_REG_DAC_CH1B_DVOL);
+
+	CHECK(restore != (size_t)-1);
+	CHECK(haven_fake_i2c_log[restore].data[0] == TAC5301_DVOL_MUTE_CODE);
+	CHECK(tac5301_control_set_mute(false) == 0);
+}
+
 /* The ADC/DAC split boundary (count == 3) was never exercised directly --
  * test_apply_filters_splits_adc_then_dac only covers 5 (both sides
  * partially real) and zero (all unity). At exactly 3, the DAC side must
@@ -672,6 +752,8 @@ int main(void)
 	RUN(test_init_enables_only_loopback_mixer);
 	RUN(test_init_powers_up_adc_dac_micbias_together);
 	RUN(test_apply_filters_splits_adc_then_dac);
+	RUN(test_apply_filters_writes_coefficients_with_adc_dac_powered_down);
+	RUN(test_apply_filters_restores_mute_state_not_volume_when_muted);
 	RUN(test_apply_filters_exactly_3_bands_leaves_dac_all_unity);
 	RUN(test_apply_filters_clamps_count_above_max_bands);
 	RUN(test_apply_filters_zero_bands_is_all_unity);
