@@ -83,8 +83,9 @@ class FindSustainedBandsTests(unittest.TestCase):
         band = sustained[0]
         self.assertIsInstance(band, SustainedBand)
         self.assertEqual(band.start_s, 0.0)
-        self.assertEqual(band.end_s, 5.0)
+        self.assertEqual(band.end_s, 6.0)  # end of the last window (start 5.0 + window_s), so end - start == duration
         self.assertAlmostEqual(band.duration_s, 6.0)  # (5-0) + window_s
+        self.assertAlmostEqual(band.end_s - band.start_s, band.duration_s)
         self.assertEqual(band.window_count, 6)
         # Every window here uses the same [900, 1100] band edges -- the mean
         # across the group should just be that same constant width.
@@ -156,6 +157,56 @@ class FindSustainedBandsTests(unittest.TestCase):
         tighter = find_sustained_bands(drifting, window_s=1.0, freq_tolerance_hz=50.0, min_duration_s=1.0)
         self.assertGreater(len(tighter), 1)
         self.assertEqual(sum(g.window_count for g in tighter), 5)
+
+
+class GateTests(unittest.TestCase):
+    """Regressions for the review of PR #16: find_troublesome_band() always
+    returns an argmax, so without gates silence and noise became 'bands'."""
+
+    def test_digital_silence_yields_no_windows(self):
+        sample_rate = 16000
+        samples = np.zeros(sample_rate * 10)
+        self.assertEqual(list(rolling_analyze(samples, sample_rate, window_s=2.0, hop_s=1.0)), [])
+
+    def test_white_noise_yields_no_windows_but_is_visible_ungated(self):
+        sample_rate = 16000
+        rng = np.random.default_rng(1)
+        samples = rng.standard_normal(sample_rate * 10) * 0.3
+        gated = list(rolling_analyze(samples, sample_rate, window_s=2.0, hop_s=1.0))
+        self.assertEqual(gated, [])
+        ungated = list(rolling_analyze(samples, sample_rate, window_s=2.0, hop_s=1.0,
+                                       min_prominence_db=0.0, min_level_dbfs=float("-inf")))
+        self.assertGreater(len(ungated), 0)  # the PR #16 behaviour, on request only
+
+    def test_a_tone_in_noise_still_passes_the_gates(self):
+        sample_rate = 16000
+        rng = np.random.default_rng(2)
+        samples = make_tone(3000.0, sample_rate, 6.0, amplitude=0.3) + rng.standard_normal(sample_rate * 6) * 0.02
+        windows = list(rolling_analyze(samples, sample_rate, window_s=2.0, hop_s=1.0))
+        self.assertEqual(len(windows), 5)
+        for w in windows:
+            self.assertAlmostEqual(w.peak_hz, 3000.0, delta=20.0)
+
+    def test_quiet_tone_below_level_gate_is_skipped(self):
+        sample_rate = 16000
+        samples = make_tone(3000.0, sample_rate, 6.0, amplitude=1e-4)  # about -83 dBFS
+        self.assertEqual(list(rolling_analyze(samples, sample_rate, window_s=2.0, hop_s=1.0)), [])
+        self.assertEqual(
+            len(list(rolling_analyze(samples, sample_rate, window_s=2.0, hop_s=1.0, min_level_dbfs=-100.0))), 5)
+
+    def test_single_window_is_not_sustained_even_when_min_duration_equals_window(self):
+        windows = [WindowResult(0.0, 1000.0, 900.0, 1100.0)]
+        self.assertEqual(find_sustained_bands(windows, window_s=2.0, min_duration_s=2.0), [])
+
+    def test_a_time_gap_splits_an_otherwise_matching_group(self):
+        # Same frequency at 0..2s and again at 10..12s, with the windows in
+        # between gated out: two separate bands, not one 13-second one.
+        windows = [WindowResult(0.0, 1000.0, 900.0, 1100.0), WindowResult(1.0, 1000.0, 900.0, 1100.0),
+                   WindowResult(10.0, 1000.0, 900.0, 1100.0), WindowResult(11.0, 1000.0, 900.0, 1100.0)]
+        sustained = find_sustained_bands(windows, window_s=2.0, min_duration_s=2.0)
+        self.assertEqual([(b.start_s, b.end_s) for b in sustained], [(0.0, 3.0), (10.0, 13.0)])
+        for b in sustained:
+            self.assertAlmostEqual(b.end_s - b.start_s, b.duration_s)
 
 
 if __name__ == "__main__":

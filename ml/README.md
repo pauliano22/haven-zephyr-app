@@ -107,6 +107,20 @@ changes which tone gets picked as dominant).
 
 ## `rolling_analyze.py` — continuous version, over a longer recording
 
+**Gates (added 2026-10-01).** `find_troublesome_band()` always returns *some*
+argmax, so `rolling_analyze()` now drops a window unless (a) its RMS level is
+above `min_level_dbfs` (default −60 dBFS: digital silence, unplugged mic and
+pauses are skipped) and (b) the peak stands `min_prominence_db` (default 10 dB)
+above the median PSD of the searched band (white/pink noise and babble do not
+qualify). `find_sustained_bands()` additionally requires `min_windows` (default
+2) consecutive windows and splits a group when consecutive windows are more
+than `max_gap_s` (default one window) apart; `end_s` is now the end of the last
+window so `end_s − start_s == duration_s`. Before this, 10 s of digital silence
+produced a "sustained band" at 23 Hz that `--rolling` would have written to the
+FreqRange characteristic as [200, 8000] Hz. Pass `min_prominence_db=0,
+min_level_dbfs=-inf` to get the ungated behaviour back.
+
+
 `analyze.py` runs once on a whole clip. `rolling_analyze.py` slides a
 window across a longer recording instead, calling the same
 `find_troublesome_band` heuristic on each window, so a problem tone that
