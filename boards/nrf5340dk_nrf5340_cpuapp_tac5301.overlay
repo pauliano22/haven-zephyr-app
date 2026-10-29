@@ -33,9 +33,12 @@
  *     -DCONFIG_HAVEN_CODEC_TAC5301=y
  *
  * (EXTRA_DTC_OVERLAY_FILE layers on top of the board's own default overlay,
- * nrf5340dk_nrf5340_cpuapp.overlay -- it does not replace it. The
- * /delete-node/ below removes that file's adau1860@64 child before this one
- * adds tac5301@50 in its place; the i2c1 bus node, i2s0 pinctrl, i2s0, and
+ * nrf5340dk_nrf5340_cpuapp.overlay -- it does not replace it. That file's
+ * adau1860@64 node is deliberately left in place next to tac5301@50 (different
+ * addresses, no bus conflict): adau1860_control.c resolves its node at file
+ * scope and is still linked, since main.c/tone_safety.c call into it, so
+ * deleting the node breaks the build. In this build its init never runs, so
+ * nothing ever drives its enable pin or talks to 0x64. The i2c1 bus node, i2s0 pinctrl, i2s0, and
  * clock nodes below re-specify the same properties the default overlay
  * already sets, which devicetree overlays merge rather than conflict on, so
  * restating them here is just for this file to read standalone.)
@@ -52,8 +55,6 @@
 &i2c1 {
 	status = "okay";
 	clock-frequency = <I2C_BITRATE_FAST>;
-
-	/delete-node/ adau1860@64;
 
 	tac5301: tac5301@50 {
 		compatible = "ti,tac5301-q1";

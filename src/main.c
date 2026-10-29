@@ -21,7 +21,9 @@
 #include "mock_audio_pipeline.h"
 #include "protocol.h"
 #include "settings_store.h"
+#ifdef CONFIG_HAVEN_CODEC_TAC5301
 #include "tac5301_control.h"
+#endif
 #include "tone_gen.h"
 #include "tone_safety.h"
 #include "wake_button.h"
@@ -137,27 +139,25 @@ int main(void)
 
 	int err;
 
-	if (IS_ENABLED(CONFIG_HAVEN_CODEC_TAC5301)) {
-		/* Bench build: boots the rest of this file (BLE/GATT, tone_gen's
-		 * I2S0-master clock, mock pipeline) unchanged -- only the codec
-		 * control-port target differs. tone_gen's I2S0 clock still needs
-		 * to run even though the TAC5301 ignores its data: that's the
-		 * BCLK/FSYNC toggling the TAC5301's PLL needs to lock (see
-		 * boards/nrf5340dk_nrf5340_cpuapp_tac5301.overlay, and
-		 * TAC5301_BENCH_EXPERIMENT.md step 2). No BLE client is expected
-		 * to connect during this bench test -- on_ble_connected()'s
-		 * ADAU1860-specific calls below simply won't fire.
-		 */
-		err = tac5301_control_init();
-		if (err) {
-			LOG_ERR("TAC5301 control init failed (err %d)", err);
-		}
-	} else {
-		err = adau1860_control_init();
-		if (err) {
-			LOG_ERR("ADAU1860 control init failed (err %d)", err);
-		}
+#ifdef CONFIG_HAVEN_CODEC_TAC5301
+	/* Bench build: everything else in this file (BLE/GATT, tone_gen's
+	 * I2S0-master clock, mock pipeline) boots unchanged. tone_gen's I2S0
+	 * clock has to run even though the TAC5301 ignores its data -- it's the
+	 * BCLK/FSYNC the TAC5301's PLL locks to (TAC5301_BENCH_EXPERIMENT.md
+	 * step 2). The ADAU1860 calls elsewhere (BLE command handlers,
+	 * tone_safety.c) are still linked and would just fail with no device at
+	 * 0x64 -- no BLE client is expected during this bench test.
+	 */
+	err = tac5301_control_init();
+	if (err) {
+		LOG_ERR("TAC5301 control init failed (err %d)", err);
 	}
+#else
+	err = adau1860_control_init();
+	if (err) {
+		LOG_ERR("ADAU1860 control init failed (err %d)", err);
+	}
+#endif
 
 	/* nRF-side LDL tone generator (I2S0 master). Independent of the codec
 	 * init above: on a DK without a codec it still streams, which is how
