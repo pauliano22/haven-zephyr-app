@@ -37,6 +37,12 @@ int wake_button_init(void)
 {
 	int err;
 
+	if (!DT_NODE_EXISTS(SW0_NODE)) {
+		/* haven_v2 has no button: it wakes when put in the case. */
+		LOG_INF("No wake button on this board");
+		return 0;
+	}
+
 	if (!gpio_is_ready_dt(&button)) {
 		LOG_ERR("Button device not ready");
 		return -ENODEV;

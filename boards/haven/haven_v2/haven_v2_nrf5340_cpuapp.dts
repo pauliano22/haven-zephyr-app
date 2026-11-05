@@ -1,0 +1,138 @@
+/*
+ * Haven v2 earbud, application core: Raytac MDBT53V-1M (nRF5340), ADAU1860 codec,
+ * SPH0641 PDM mic (into the codec), Nordic nPM1100 PMIC, charged through two case
+ * pogo pins. No USB, button, UART, flash, SD, IMU or fuel gauge.
+ */
+
+/dts-v1/;
+#include <nordic/nrf5340_cpuapp_qkaa.dtsi>
+#include "haven_v2_nrf5340_cpuapp-pinctrl.dtsi"
+
+/ {
+	model = "Haven v2 earbud (nRF5340 application core)";
+	compatible = "haven,haven-v2-nrf5340-cpuapp";
+
+	chosen {
+		zephyr,sram = &sram0_image;
+		zephyr,flash = &flash0;
+		zephyr,code-partition = &slot0_partition;
+		zephyr,sram-secure-partition = &sram0_s;
+		zephyr,sram-non-secure-partition = &sram0_ns;
+		zephyr,bt-hci = &bt_hci_ipc0;
+		watchdog0 = &wdt0;
+	};
+
+	leds {
+		compatible = "gpio-leds";
+		/* Red status LED, switched by Q2 (gate high = on). */
+		led_status: led_status {
+			gpios = <&gpio1 12 GPIO_ACTIVE_HIGH>;
+			label = "Red status LED";
+		};
+	};
+
+	aliases {
+		led0 = &led_status;
+		watchdog0 = &wdt0;
+	};
+
+	/*
+	 * nPM1100 signals and ADC inputs. No driver uses these yet; they are here so
+	 * charger/battery code has one place to read the pins from
+	 * (DT_PATH(zephyr_user), e.g. GPIO_DT_SPEC_GET(DT_PATH(zephyr_user), charger_chg_gpios)).
+	 *  - CHG / ERR: nPM1100 open-drain outputs, low = charging / error.
+	 *  - SHPACT: high puts the PMIC in ship mode (it leaves ship mode when the
+	 *    bud is put back in the case and VBUS appears).
+	 *  - io-channels: battery level (VSYS divider, AIN1) and in-case detect (VBUS divider, AIN4).
+	 */
+	zephyr,user {
+		charger-chg-gpios = <&gpio0 10 (GPIO_ACTIVE_LOW | GPIO_PULL_UP)>;
+		charger-err-gpios = <&gpio0 11 (GPIO_ACTIVE_LOW | GPIO_PULL_UP)>;
+		ship-mode-gpios = <&gpio0 12 GPIO_ACTIVE_HIGH>;
+		io-channels = <&adc 1>, <&adc 4>;
+		io-channel-names = "vsys_sense", "vbus_det";
+	};
+};
+
+&clock {
+	/* 12.288 MHz audio PLL for an exact 48 kHz I2S frame clock. */
+	hfclkaudio-frequency = <12288000>;
+};
+
+/* 32 MHz crystal inside the module. Same setting as v1's MDBT53-1M; confirm against the
+ * MDBT53V-1M spec before production. */
+&hfxo {
+	load-capacitors = "internal";
+	load-capacitance-femtofarad = <8000>;
+};
+
+/* 32.768 kHz crystal with external 9 pF caps (C2/C14), as on v1. */
+&lfxo {
+	load-capacitors = "external";
+};
+
+&gpiote {
+	status = "okay";
+};
+
+&gpio0 {
+	status = "okay";
+};
+
+&gpio1 {
+	status = "okay";
+};
+
+&adc {
+	status = "okay";
+	#address-cells = <1>;
+	#size-cells = <0>;
+
+	/* Dividers are ~1 MOhm source impedance, so use the longest acquisition time. */
+	channel@1 {
+		reg = <1>;
+		zephyr,gain = "ADC_GAIN_1_6";
+		zephyr,reference = "ADC_REF_INTERNAL";
+		zephyr,acquisition-time = <ADC_ACQ_TIME(ADC_ACQ_TIME_MICROSECONDS, 40)>;
+		zephyr,input-positive = <NRF_SAADC_AIN1>; /* P0.05, VSYS_SENSE */
+		zephyr,resolution = <12>;
+	};
+
+	channel@4 {
+		reg = <4>;
+		zephyr,gain = "ADC_GAIN_1_6";
+		zephyr,reference = "ADC_REF_INTERNAL";
+		zephyr,acquisition-time = <ADC_ACQ_TIME(ADC_ACQ_TIME_MICROSECONDS, 40)>;
+		zephyr,input-positive = <NRF_SAADC_AIN4>; /* P0.25, VBUS_DET */
+		zephyr,resolution = <12>;
+	};
+};
+
+&i2s0 {
+	compatible = "nordic,nrf-i2s";
+	status = "okay";
+	pinctrl-0 = <&i2s0_default>;
+	pinctrl-1 = <&i2s0_sleep>;
+	pinctrl-names = "default", "sleep";
+	clock-source = "ACLK";
+};
+
+&i2c1 {
+	compatible = "nordic,nrf-twim";
+	status = "okay";
+	pinctrl-0 = <&i2c1_default>;
+	pinctrl-1 = <&i2c1_sleep>;
+	pinctrl-names = "default", "sleep";
+	clock-frequency = <I2C_BITRATE_FAST>;
+
+	adau1860: adau1860@64 {
+		compatible = "analog,adau1860";
+		reg = <0x64>;
+		enable-gpios = <&gpio0 4 GPIO_ACTIVE_HIGH>;   /* PD# (ball E4) */
+		/* U3 load switch (SENSORS_ENABLE): powers the codec and the mic. */
+		supply-gpios = <&gpio1 11 GPIO_ACTIVE_HIGH>;
+		supply-delay-us = <300>;
+	};
+};
+
+#include <nordic/nrf5340_cpuapp_partition.dtsi>
