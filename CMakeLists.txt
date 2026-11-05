@@ -19,3 +19,7 @@ target_sources(app PRIVATE
   src/ack.c
   src/wake_button.c
 )
+
+# Resolves DT_NODELABEL(tac5301) at file scope, which only the TAC5301 bench
+# overlay defines.
+target_sources_ifdef(CONFIG_HAVEN_CODEC_TAC5301 app PRIVATE src/tac5301_control.c)

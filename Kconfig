@@ -2,6 +2,24 @@ mainmenu "Haven nRF5340 firmware"
 
 menu "Haven"
 
+choice HAVEN_CODEC
+	prompt "Which codec this build's control-port init targets"
+	default HAVEN_CODEC_ADAU1860
+
+config HAVEN_CODEC_ADAU1860
+	bool "ADAU1860 (proven path; nRF5340 DK bench overlay and openearable_v2 board)"
+
+config HAVEN_CODEC_TAC5301
+	bool "TAC5301-Q1 (breadboard bench test; see TAC5301_BENCH_EXPERIMENT.md)"
+	help
+	  Pair with boards/nrf5340dk_nrf5340_cpuapp_tac5301.overlay (the
+	  default nrf5340dk overlay targets the ADAU1860 instead, at a
+	  different I2C address) -- that overlay's own header comment has the
+	  exact west build invocation. tac5301_control.c is unit-tested on
+	  host (tests/host/test_tac5301_coeffs.c) but, as of this option's
+	  addition, NOT YET RUN ON REAL HARDWARE.
+endchoice
+
 config HAVEN_FDSP_RATE_HZ
 	int "FastDSP frame rate the biquad coefficients are designed for (Hz)"
 	default 192000
