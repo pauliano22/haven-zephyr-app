@@ -1,0 +1,10 @@
+identifier: haven_v2/nrf5340/cpunet
+name: Haven v2 earbud (network core)
+vendor: haven
+type: mcu
+arch: arm
+ram: 64
+flash: 256
+toolchain:
+  - zephyr
+supported: []

@@ -88,6 +88,14 @@ int tac5301_control_init(void);
  * of which physical chain or order they run in), confirmed in
  * TAC5301_EVALUATION.md's reasoning about the loopback path not passing
  * through any resampling between the two chains.
+ *
+ * Sequencing (SLASFD9A §6.3.7.1.5 / §6.3.7.2): coefficients must be written
+ * with the ADC/DAC channels powered down in the mono single-bank
+ * configuration, so once the codec is initialised this call mutes the DAC,
+ * powers ADC+DAC down (MICBIAS stays on), writes all six slots, powers
+ * them back up and restores the volume -- an audible dropout per update.
+ * Glitch-free live updates would need the two-channel dual-bank mode with
+ * its switch bit, which this driver does not implement.
  */
 int tac5301_control_apply_filters(const struct filter_band *bands, size_t count);
 

@@ -1,0 +1,50 @@
+/*
+ * Haven v2 earbud, network core (BLE controller via ipc_radio). No peripherals pinned here.
+ */
+
+/dts-v1/;
+#include <nordic/nrf5340_cpunet_qkaa.dtsi>
+
+/ {
+	model = "Haven v2 earbud (nRF5340 network core)";
+	compatible = "haven,haven-v2-nrf5340-cpunet";
+
+	chosen {
+		zephyr,bt-hci-ipc = &ipc0;
+		zephyr,sram = &sram1;
+		zephyr,flash = &flash1;
+		zephyr,code-partition = &slot0_partition;
+		watchdog0 = &wdt0;
+	};
+};
+
+&gpiote {
+	status = "okay";
+};
+
+&flash1 {
+	partitions {
+		compatible = "fixed-partitions";
+		#address-cells = <1>;
+		#size-cells = <1>;
+
+		boot_partition: partition@0 {
+			label = "mcuboot";
+			reg = <0x00000000 0xc000>;
+		};
+		slot0_partition: partition@c000 {
+			label = "image-0";
+			reg = <0x0000C000 0x12000>;
+		};
+		slot1_partition: partition@1e000 {
+			label = "image-1";
+			reg = <0x0001E000 0x12000>;
+		};
+		storage_partition: partition@3a000 {
+			label = "storage";
+			reg = <0x0003a000 0x6000>;
+		};
+	};
+};
+
+#include <nordic/nrf5340_shared_sram_partition.dtsi>
