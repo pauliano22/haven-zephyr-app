@@ -18,6 +18,8 @@ target_sources(app PRIVATE
   src/tone_safety.c
   src/ack.c
   src/wake_button.c
+  src/battery_guard.c
+  src/pod_status.c
 )
 
 # Resolves DT_NODELABEL(tac5301) at file scope, which only the TAC5301 bench

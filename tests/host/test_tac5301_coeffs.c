@@ -16,6 +16,8 @@
 #include <math.h>
 #include <string.h>
 
+#define CONFIG_HAVEN_TAC5301_OUT_DRIVE 2 /* Kconfig default: bench speaker */
+
 #include "../../src/tone_gen.c" /* tac5301_control.c's tone functions call into it */
 #include "../../src/tac5301_control.c"
 
@@ -191,6 +193,35 @@ static void test_init_enables_only_loopback_mixer(void)
 
 	CHECK(mix != NULL);
 	CHECK(mix->data[0] == TAC5301_MIXER_EN_LOOPBACK_MIXER);
+}
+
+/* The chip powers up asleep: the first write must wake it, and the wake must come before the
+ * power-up write, or the ADC / DAC / mic bias never start (datasheet 8.2.3, Table 7-5). */
+static void test_init_wakes_chip_before_anything_else(void)
+{
+	haven_fake_i2c_reset();
+	initialised = false;
+	tac5301_control_init();
+
+	CHECK(haven_fake_i2c_log_count > 1);
+	CHECK(haven_fake_i2c_log[0].reg == TAC5301_REG_SW_RESET); /* reset, then wake */
+	CHECK(haven_fake_i2c_log[0].data[0] == 0x01);
+	CHECK(haven_fake_i2c_log[1].reg == TAC5301_REG_DEV_MISC_CFG);
+	CHECK(haven_fake_i2c_log[1].data[0] == (TAC5301_MISC_SLEEP_ENZ | TAC5301_MISC_SLEEP_EXIT_VREF_EN));
+}
+
+static void test_init_sets_output_drive_on_both_pins(void)
+{
+	haven_fake_i2c_reset();
+	initialised = false;
+	tac5301_control_init();
+
+	const struct haven_fake_i2c_xfer *p = haven_fake_i2c_last_write_page(0, TAC5301_REG_OUT1X_CFG1);
+	const struct haven_fake_i2c_xfer *m = haven_fake_i2c_last_write_page(0, TAC5301_REG_OUT1X_CFG2);
+
+	CHECK(p != NULL && m != NULL);
+	CHECK(p->data[0] == 0xA0); /* drive 2 (down to 4 ohm), level control left at its reset 100b */
+	CHECK(m->data[0] == 0xA0);
 }
 
 static void test_init_powers_up_adc_dac_micbias_together(void)
@@ -750,6 +781,8 @@ int main(void)
 	RUN(test_biquad_to_words_matches_ti_app_note_conversion);
 	RUN(test_init_sets_3_biquads_per_channel);
 	RUN(test_init_enables_only_loopback_mixer);
+	RUN(test_init_wakes_chip_before_anything_else);
+	RUN(test_init_sets_output_drive_on_both_pins);
 	RUN(test_init_powers_up_adc_dac_micbias_together);
 	RUN(test_apply_filters_splits_adc_then_dac);
 	RUN(test_apply_filters_writes_coefficients_with_adc_dac_powered_down);

@@ -175,6 +175,15 @@ for `CONFIG_CLOCK_CONTROL_NRF_K32SRC_RC=y`. Accuracy drops to the 250 ppm
 class (still inside BLE's 500 ppm budget) and power gets worse; this is for
 getting a bench alive, not for the product — fix the crystal placement.
 
+## Low-battery shutdown (haven_v2 board only)
+
+`src/battery_guard.c`, on by default for the haven_v2 board (`CONFIG_HAVEN_BATTERY_GUARD`). Every
+`CONFIG_HAVEN_BATTERY_CHECK_PERIOD_S` (10 s) it reads the battery through the VSYS divider. After 3 readings in a row below
+`CONFIG_HAVEN_BATTERY_CUTOFF_MV` (3300) with no charger attached it drives SHPACT high, which puts the nPM1100 in ship
+mode: the battery is disconnected until the pod is back on its charger. The decision rule is host-tested
+(`tests/host/test_battery_guard.c`). **Never run on hardware**; the threshold and the ship-mode behaviour need a bench check.
+The battery voltage is not yet reported to the app.
+
 ## Device → app acks
 
 Every JSON line the app writes gets one JSON ack back on NUS TX, and the

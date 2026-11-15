@@ -28,6 +28,30 @@
 #define TAC5301_REG_PAGE_CFG   0x00 /* Any page: select the active page. */
 #define TAC5301_REG_SW_RESET   0x01 /* bit0, self-clearing (datasheet 6.4.2). */
 
+/* DEV_MISC_CFG, reset 0x00 = ASLEEP. The chip powers up in sleep mode and stays there until SLEEP_ENZ is set
+ * (datasheet 8.2.3 step 2a, Table 7-5). Found missing from this driver on 2026-11-14, before any hardware run:
+ * without it every later write is accepted but the ADC, DAC and mic bias never start. */
+#define TAC5301_REG_DEV_MISC_CFG 0x02
+#define TAC5301_MISC_SLEEP_ENZ          (1u << 0) /* 1 = not in sleep mode */
+#define TAC5301_MISC_SLEEP_EXIT_VREF_EN (1u << 3) /* 1 = bring up VREF as well as DREG on wake (datasheet 6.3.5) */
+#define TAC5301_WAKE_DELAY_MS 10                  /* datasheet: at least 2 ms; VREF quick-charge 3.5 ms typical */
+
+/* OUT1x_CFG1 / OUT1x_CFG2, reset 0x20: bits[7:6] = load the pin may drive (Tables 7-73, 7-74),
+ * bits[5:3] = level control, reset 100b = -8 dB, left alone.
+ * 0 = line out (300 ohm min), 1 = headphone (16 ohm min), 2 = 4 ohm min, 3 = receiver, higher dynamic range. */
+#define TAC5301_REG_OUT1X_CFG1 0x65 /* OUT1P */
+#define TAC5301_REG_OUT1X_CFG2 0x66 /* OUT1M */
+#define TAC5301_OUT_DRIVE_SHIFT 6
+#define TAC5301_OUT_LVL_CTRL_RESET (4u << 3)
+
+/* DEV_STS1, read-only (Table 7-92): what the chip itself reports. */
+#define TAC5301_REG_DEV_STS1 0x7A
+#define TAC5301_STS1_MODE(v)        (((v) >> 5) & 0x7) /* 4 asleep, 6 awake but channels off, 7 awake and running */
+#define TAC5301_STS1_PLL            (1u << 4)
+#define TAC5301_STS1_MICBIAS        (1u << 3)
+#define TAC5301_STS1_IN_FAULT       (1u << 1)
+#define TAC5301_STS1_MICBIAS_FAULT  (1u << 0)
+
 #define TAC5301_REG_MIXER_CFG0 0x2C
 #define TAC5301_MIXER_EN_DAC_ASI_MIXER   (1u << 7)
 #define TAC5301_MIXER_EN_SIDE_CHAIN      (1u << 6)

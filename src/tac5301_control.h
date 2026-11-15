@@ -75,6 +75,10 @@ enum tac5301_bq_chain { TAC5301_CHAIN_ADC = 0, TAC5301_CHAIN_DAC = 1 };
  */
 int tac5301_control_init(void);
 
+/* Bench aid: read the chip's own status register (DEV_STS1) and log, in plain words, whether it is
+ * awake, has locked to the audio clock and has the microphone bias on. Call after the clocks have started. */
+int tac5301_control_log_status(void);
+
 /* Compute RBJ notch / peaking-cut coefficients for each band at
  * TAC5301_RATE_HZ and write them into the 3 ADC-side + 3 DAC-side channel-1
  * biquad slots. Haven supports up to PROTOCOL_MAX_BANDS (5) bands; this

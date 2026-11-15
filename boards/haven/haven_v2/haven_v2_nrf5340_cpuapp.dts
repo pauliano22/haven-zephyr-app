@@ -131,7 +131,10 @@
 		enable-gpios = <&gpio0 4 GPIO_ACTIVE_HIGH>;   /* PD# (ball E4) */
 		/* U3 load switch (SENSORS_ENABLE): powers the codec and the mic. */
 		supply-gpios = <&gpio1 11 GPIO_ACTIVE_HIGH>;
-		supply-delay-us = <300>;
+		/* 6 ms: the AP22916C load switch (slow turn-on, chosen 2026-11-11 to avoid a
+		 * brown-out, DESIGN_REVIEW_2026-11.md finding 3) takes 3.8 ms typ at 1.8 V.
+		 * Also safe for the older AP22916B. */
+		supply-delay-us = <6000>;
 	};
 };
 

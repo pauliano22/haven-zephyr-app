@@ -163,3 +163,20 @@ non-speech test signal tried (a pure tone, an alarm-like warble), because
 it's a *speech* denoiser and this tool's whole job is finding narrowband,
 non-speech tones. See `ML_RL_FEASIBILITY.md` (repo root) for the full
 writeup; that recommendation has been withdrawn as a result.
+
+
+## Learn a sound from one example (`sound_signature.py`)
+
+Prototype for the "teach the device a sound" idea in `ADAPTIVE_PROTECTION_DESIGN.md`. `learn_signature()`
+takes a clip where a sound starts and stops and keeps which frequency bands rise (1/6-octave bands) and how
+often the sound repeats. `detect()` then watches a stream, measures each band against its own recent
+background, and reports when the same pattern is present, with hysteresis.
+
+    python3 -m unittest tests.test_sound_signature        # about 35 s
+    python3 experiments/sound_signature_experiment.py    # about 5 min, prints the tables
+
+Measured on synthetic scenes (see the experiment's docstring for what that does and does not show): a
+cycling hum is found 100% of the time alone with 0% false alarms, and 34 to 52% of the time when six other
+sounds overlap, still with 0% false alarms. Limits: needs the sound to start and stop inside the clip, cannot
+act before it has heard part of a sound (about 2 s to notice, 4 s to let go), and has only been tried on
+synthetic audio.

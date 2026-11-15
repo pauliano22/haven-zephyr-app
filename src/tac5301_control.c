@@ -392,6 +392,41 @@ static void on_tone_stopped(void)
 
 /* ── Public API ──────────────────────────────────────────────────────── */
 
+int tac5301_control_log_status(void)
+{
+	uint8_t reg = TAC5301_REG_DEV_STS1;
+	uint8_t v = 0;
+	int err;
+
+	if (!initialised) {
+		LOG_ERR("BENCH CHECK: chip not set up (it did not answer at start-up)");
+		return -ENODEV;
+	}
+	err = select_page(0);
+	if (!err) {
+		err = i2c_write_read_dt(&bus, &reg, 1, &v, 1);
+	}
+	if (err) {
+		LOG_ERR("BENCH CHECK: could not read the chip's status: %d", err);
+		return err;
+	}
+	LOG_INF("BENCH CHECK: status 0x%02x -> mode %u (%s), clock %s, mic bias %s%s%s", v,
+		(unsigned int)TAC5301_STS1_MODE(v),
+		TAC5301_STS1_MODE(v) == 7 ? "RUNNING" : TAC5301_STS1_MODE(v) == 6 ? "awake, channels off" :
+		TAC5301_STS1_MODE(v) == 4 ? "ASLEEP" : "unexpected",
+		(v & TAC5301_STS1_PLL) ? "LOCKED" : "MISSING (check BCLK / FSYNC wires)",
+		(v & TAC5301_STS1_MICBIAS) ? "ON" : "OFF (check the 9 V on HVDD)",
+		(v & TAC5301_STS1_IN_FAULT) ? ", INPUT FAULT" : "",
+		(v & TAC5301_STS1_MICBIAS_FAULT) ? ", MIC BIAS FAULT" : "");
+	if (TAC5301_STS1_MODE(v) == 7 && (v & TAC5301_STS1_PLL) && (v & TAC5301_STS1_MICBIAS)) {
+		LOG_INF("BENCH CHECK: PASS -- the chip says microphone-to-speaker is running");
+	} else {
+		LOG_ERR("BENCH CHECK: NOT RUNNING -- see the line above");
+	}
+	return 0;
+}
+
+
 int tac5301_control_init(void)
 {
 	int err;
@@ -401,6 +436,39 @@ int tac5301_control_init(void)
 	if (!device_is_ready(bus.bus)) {
 		LOG_ERR("I2C bus for the TAC5301-Q1 not ready");
 		return -ENODEV;
+	}
+
+	/* Software reset first: the chip keeps its registers while it has power, so without this a
+	 * re-flash or a DK reset would start from whatever the last run left (and the datasheet asks
+	 * for it after a slow supply ramp, section 8.3). Self-clearing; registers return to page 0. */
+	err = reg_write8(TAC5301_REG_SW_RESET, 0x01);
+	if (err) {
+		LOG_ERR("TAC5301-Q1 did not answer on I2C (0x%02x): %d -- check power, SDA/SCL, grounds",
+			TAC5301_I2C_ADDR, err);
+		return err;
+	}
+	k_msleep(TAC5301_WAKE_DELAY_MS);
+
+	/* Then wake it: it powers up (and resets) asleep (DEV_MISC_CFG reset 0x00). */
+	err = reg_write8(TAC5301_REG_DEV_MISC_CFG,
+			 TAC5301_MISC_SLEEP_ENZ | TAC5301_MISC_SLEEP_EXIT_VREF_EN);
+	if (err) {
+		return err;
+	}
+	k_msleep(TAC5301_WAKE_DELAY_MS);
+
+	/* Output driver strength for the load on OUT1P / OUT1M (reset = line out, 300 ohm minimum:
+	 * too weak for a speaker or receiver). */
+	err = reg_write8(TAC5301_REG_OUT1X_CFG1,
+			 (uint8_t)((CONFIG_HAVEN_TAC5301_OUT_DRIVE << TAC5301_OUT_DRIVE_SHIFT) |
+				   TAC5301_OUT_LVL_CTRL_RESET));
+	if (!err) {
+		err = reg_write8(TAC5301_REG_OUT1X_CFG2,
+				 (uint8_t)((CONFIG_HAVEN_TAC5301_OUT_DRIVE << TAC5301_OUT_DRIVE_SHIFT) |
+					   TAC5301_OUT_LVL_CTRL_RESET));
+	}
+	if (err) {
+		return err;
 	}
 
 	/* ADC_CH1_CFG0: single-ended, AC-coupled analog input -- matches the
