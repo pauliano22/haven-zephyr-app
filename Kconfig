@@ -20,6 +20,15 @@ config HAVEN_CODEC_TAC5301
 	  addition, NOT YET RUN ON REAL HARDWARE.
 endchoice
 
+config HAVEN_TAC5301_OUT_DRIVE
+	int "TAC5301-Q1 output driver strength (0 line out, 1 headphone 16 ohm, 2 down to 4 ohm, 3 receiver)"
+	range 0 3
+	default 2
+	depends on HAVEN_CODEC_TAC5301
+	help
+	  Written to OUT1x_CFG1 / OUT1x_CFG2 bits [7:6]. The bench speaker is 8 ohm across OUT1P / OUT1M,
+	  which each pin sees as 4 ohm, so the bench default is 2. The chip's reset value is 0 (line out).
+
 config HAVEN_FDSP_RATE_HZ
 	int "FastDSP frame rate the biquad coefficients are designed for (Hz)"
 	default 192000
@@ -120,6 +129,27 @@ config HAVEN_TONE_ROUTE_FDSP_MIX
 	  established -- for hardware experiments only.
 
 endchoice
+
+config HAVEN_BATTERY_GUARD
+	bool "Low-battery shutdown through the nPM1100's ship mode"
+	default y if BOARD_HAVEN_V2_NRF5340_CPUAPP
+	select ADC
+	help
+	  Reads the battery through the VSYS divider and puts the nPM1100 in
+	  ship mode (battery disconnected until the pod is back on its charger)
+	  when it stays below HAVEN_BATTERY_CUTOFF_MV. Needs the zephyr,user
+	  io-channels and ship-mode-gpios of the haven_v2 board. Untested on
+	  hardware. See src/battery_guard.c.
+
+config HAVEN_BATTERY_CUTOFF_MV
+	int "Battery voltage (mV, read at VSYS under load) below which to shut down"
+	default 3300
+	range 3000 3700
+
+config HAVEN_BATTERY_CHECK_PERIOD_S
+	int "Seconds between battery readings"
+	default 10
+	range 1 600
 
 endmenu
 

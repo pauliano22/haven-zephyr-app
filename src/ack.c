@@ -84,3 +84,26 @@ int ack_format_event_boot(const char *fw_version, uint32_t fdsp_rate_hz,
 		      "{\"event\":\"boot\",\"fw\":\"%s\",\"fdsp_rate\":%lu,\"dac_source\":\"%s\"}\n",
 		      fw_version, (unsigned long)fdsp_rate_hz, dac_source);
 }
+
+static const char *tri(int v)
+{
+	return v == POD_UNKNOWN ? "null" : (v ? "true" : "false");
+}
+
+int ack_format_event_status(const struct pod_status *st, char *buf, size_t size)
+{
+	int mv = st->batt_mv < 0 ? 0 : (st->batt_mv > 9999 ? 9999 : st->batt_mv);
+	int pct = pod_status_batt_pct(mv);
+	char pct_s[8];
+
+	if (pct == POD_UNKNOWN) {
+		snprintf(pct_s, sizeof(pct_s), "null");
+	} else {
+		snprintf(pct_s, sizeof(pct_s), "%d", pct);
+	}
+	return FORMAT(buf, size,
+		      "{\"event\":\"status\",\"mv\":%d,\"pct\":%s,\"usb\":%s,\"chg\":%s,\"fault\":%s,"
+		      "\"codec\":%s,\"problem\":\"%s\"}\n",
+		      mv, pct_s, tri(st->usb), tri(st->charging), tri(st->chg_fault), tri(st->codec),
+		      pod_status_problem(st));
+}

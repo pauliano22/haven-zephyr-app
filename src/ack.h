@@ -18,6 +18,8 @@
  *   {"ack":"MULTI_FILTER","ok":false,"err":"dsp","code":-5}\n
  *   {"event":"tone_watchdog"}\n                        firmware auto-silenced
  *   {"event":"boot","fw":"0.1.0-dev","fdsp_rate":192000,"dac_source":"fdsp"}\n
+ *   {"event":"status","mv":3850,"pct":57,"usb":false,"chg":false,"fault":false,"codec":true,"problem":"none"}\n
+ *                                                      pod self-test; null = board cannot tell
  *
  * Numbers are integers (f0 and level_db are rounded) so no float formatting
  * is needed on the wire, and every message fits comfortably inside one
@@ -30,6 +32,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "pod_status.h"
 #include "protocol.h"
 
 /* Largest formatted line including the trailing '\n' and NUL. */
@@ -50,5 +53,7 @@ int ack_format_rejected(char *buf, size_t size);
 int ack_format_event_tone_watchdog(char *buf, size_t size);
 int ack_format_event_boot(const char *fw_version, uint32_t fdsp_rate_hz,
 			  const char *dac_source, char *buf, size_t size);
+/* Pod self-test / status, see pod_status.h. Longest form is 117 bytes + NUL. */
+int ack_format_event_status(const struct pod_status *st, char *buf, size_t size);
 
 #endif /* HAVEN_ACK_H_ */

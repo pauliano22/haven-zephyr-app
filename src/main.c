@@ -27,6 +27,8 @@
 #include "tone_gen.h"
 #include "tone_safety.h"
 #include "wake_button.h"
+#include "battery_guard.h"
+#include "pod_status.h"
 
 LOG_MODULE_REGISTER(main, LOG_LEVEL_INF);
 
@@ -94,6 +96,36 @@ static void handle_line(const char *line)
 	send_line(ack, ack_format_command(&cmd, err, ack, sizeof(ack)));
 }
 
+/* Pod self-test / status (pod_status.h). codec_state is set once in main(): whether the audio
+ * chip answered its init sequence. The report is built in the system work queue (it takes ADC
+ * readings), sent on connect and every POD_STATUS_PERIOD_S while a phone is connected.
+ */
+static int codec_state = POD_UNKNOWN;
+static atomic_t connected;
+
+static void fill_status(struct pod_status *st)
+{
+	battery_guard_fill_status(st);
+	st->codec = codec_state;
+}
+
+static void status_tick(struct k_work *work);
+static K_WORK_DELAYABLE_DEFINE(status_work, status_tick);
+
+static void status_tick(struct k_work *work)
+{
+	struct pod_status st;
+	char ev[ACK_MAX_LEN];
+
+	ARG_UNUSED(work);
+	if (!atomic_get(&connected)) {
+		return;
+	}
+	fill_status(&st);
+	send_line(ev, ack_format_event_status(&st, ev, sizeof(ev)));
+	k_work_reschedule(&status_work, K_SECONDS(POD_STATUS_PERIOD_S));
+}
+
 /* tone_safety.c auto-silenced a tone (no keep-alive). Tell the app, which
  * otherwise only learns its own ramp state machine has gone quiet.
  */
@@ -119,6 +151,8 @@ static void on_ble_connected(void)
 						     ? "dmic_direct"
 						     : "fdsp",
 					     ev, sizeof(ev)));
+	atomic_set(&connected, 1);
+	k_work_reschedule(&status_work, K_MSEC(500));	/* after the app has subscribed */
 }
 
 /* Losing the BLE link must silence any active tone immediately, the same
@@ -131,6 +165,8 @@ static void on_ble_disconnected(void)
 {
 	adau1860_control_on_ble_disconnected();
 	tone_safety_stop();
+	atomic_set(&connected, 0);
+	(void)k_work_cancel_delayable(&status_work);
 }
 
 int main(void)
@@ -158,6 +194,7 @@ int main(void)
 		LOG_ERR("ADAU1860 control init failed (err %d)", err);
 	}
 #endif
+	codec_state = err ? 0 : 1;
 
 	/* nRF-side LDL tone generator (I2S0 master). Independent of the codec
 	 * init above: on a DK without a codec it still streams, which is how
@@ -166,6 +203,25 @@ int main(void)
 	if (err) {
 		LOG_WRN("Tone generator init failed (err %d) -- TONE_* will be no-ops", err);
 	}
+
+#ifdef CONFIG_HAVEN_CODEC_TAC5301
+	/* The TAC5301's hear-through path only runs while BCLK / FSYNC are present, and tone_gen stops
+	 * the I2S link whenever no tone is playing. For the bench build, stream silence from boot so the
+	 * clocks never stop. Called directly (not through the TONE_* command path), so the codec's mixer
+	 * stays on the mic-to-speaker loopback and the tone watchdog is not involved. A TONE_START /
+	 * TONE_STOP over Bluetooth would end this keep-alive: do not connect the app during the bench test.
+	 * Found missing on 2026-11-14, before any hardware run. */
+	if (!err) {
+		err = tone_gen_start(1000.0f, 0);
+		if (err) {
+			LOG_ERR("TAC5301 bench: could not start the clock keep-alive (err %d)", err);
+		} else {
+			LOG_INF("TAC5301 bench: I2S clocks running continuously (silent keep-alive)");
+		}
+		k_msleep(500); /* clock lock and mic-bias ramp */
+		(void)tac5301_control_log_status();
+	}
+#endif
 
 	tone_safety_set_watchdog_cb(on_tone_watchdog);
 	ble_transport_set_conn_callbacks(on_ble_connected, on_ble_disconnected);
@@ -193,6 +249,21 @@ int main(void)
 	err = wake_button_init();
 	if (err) {
 		LOG_WRN("Wake button init failed (err %d) -- continuing without it", err);
+	}
+
+	err = battery_guard_init();
+	if (err) {
+		LOG_ERR("Battery guard init failed (err %d) -- NO low-battery shutdown", err);
+	}
+
+	{	/* one self-test line in the RTT log, for the programming / bring-up bench */
+		struct pod_status st;
+
+		fill_status(&st);
+		LOG_INF("SELF TEST: battery %d mV (%d %%), usb %d, charging %d, charger fault %d, "
+			"audio chip %d -> problem: %s (1 yes, 0 no, -1 cannot tell)",
+			st.batt_mv, pod_status_batt_pct(st.batt_mv), st.usb, st.charging,
+			st.chg_fault, st.codec, pod_status_problem(&st));
 	}
 
 	LOG_INF("Ready — waiting for app connection");

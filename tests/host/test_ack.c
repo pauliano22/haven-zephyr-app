@@ -11,6 +11,7 @@
 #include <string.h>
 
 #include "../../src/ack.c"
+#include "../../src/pod_status.c"
 #include "../../src/protocol.c"
 #include "../../src/tone_safety.c"
 
