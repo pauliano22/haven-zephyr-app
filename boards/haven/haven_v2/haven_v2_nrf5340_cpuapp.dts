@@ -59,11 +59,13 @@
 	hfclkaudio-frequency = <12288000>;
 };
 
-/* 32 MHz crystal inside the module. Same setting as v1's MDBT53-1M; confirm against the
- * MDBT53V-1M spec before production. */
+/* 32 MHz crystal inside the module (CL 8 pF, no external caps). This value is the per-pin
+ * "CAPACITANCE" in the nRF5340 XOSC32MCAPS formula (soc/nordic/nrf53/soc.c), not the crystal's CL.
+ * Raytac MDBT53V-1M spec section 3 gives 12.5 pF for this module (its worked CAPVALUE example).
+ * Was 8000 until 2026-11-19 (copied from v1), which leaves the crystal under-loaded and running fast. */
 &hfxo {
 	load-capacitors = "internal";
-	load-capacitance-femtofarad = <8000>;
+	load-capacitance-femtofarad = <12500>;
 };
 
 /* 32.768 kHz crystal with external 9 pF caps (C2/C14), as on v1. */
